@@ -5,8 +5,8 @@
 - 整合分支：`integration/pr-batch`，**HEAD `623fe1f`**，基于本地线 `feat/webwallgl-npm-3.0.0` @ `877952e`（领先 `origin/main` 111 笔，落后 0 笔）
 - 本轮范围：GitHub 上全部 **7 个 open PR**（#196 / #199 / #201 / #202 / #203 / #204 / #206）
 - 结论：**6 个已本地合并（移植）进整合分支并全链验收；#196 已是本地线祖先，本地无需动作、只需决定何时合入 main**。评审发现并已在本线修掉 **4 条 P1**（#202 AVIF 尺寸探针、#203 对比度红线、#204 选择器截断、#199 判据缺牙 + 404 文案因果），修复批次另跑一轮全链验收。
-- 交付物（均未提交，工作区新增 4 个未跟踪项）：本报告、`GITHUB-HANDOFF.md`（回灌文稿：7 条 PR 评论草稿 + 2 条 issue 草稿 + 命令备忘）、`patches/`（8 个可直接 `git apply` 的补丁）、以及仓库既有的 `ENGINEERING-REPORT.md`
-- 分支未 push、未评论、未开新 PR、未改动 main
+- 交付物：本报告、`GITHUB-HANDOFF.md`（回灌文稿：7 条 PR 评论 + 2 条 issue + 命令备忘）、`patches/`（8 个可直接 `git apply` 的补丁）、以及仓库既有的 `ENGINEERING-REPORT.md`
+- **已回灌（2026-10-13）**：`integration/pr-batch`（PR [#207](https://github.com/elysia395/dsh-wallpaper-engine/pull/207)）与 `integration/handoff-docs`（本报告 + 补丁）已 push；7 个 PR 各发一条评论；issue [#208](https://github.com/elysia395/dsh-wallpaper-engine/issues/208) / [#209](https://github.com/elysia395/dsh-wallpaper-engine/issues/209) 已开；**`main` 未合并**（留给评审）
 
 ---
 
@@ -192,9 +192,9 @@ cda8149 fix(avatar): AVIF 尺寸探针（ISOBMFF/iprp/ipco/ispe）补全 —— 
 
 ## 5. 未闭合项与建议
 
-### 5.1 未 push / 未评论 / PR 仍 OPEN
+### 5.1 已回灌（分支 / PR / 评论 / issue 均已发出）
 
-整合分支 `integration/pr-batch` 只在本地，7 个 PR 在 GitHub 上状态未变（#198 / #195 等已关闭项不在本轮范围；#196 吸收的 #195 已并入其 head）。按用户本轮选择（**先只在本地执行**），未推分支、未开 issue、未评论、未动 main。
+整合分支 `integration/pr-batch` @ `623fe1f` 已 push，并在 PR [#207](https://github.com/elysia395/dsh-wallpaper-engine/pull/207) 上向 `main` 发起整合；本报告与补丁在 `integration/handoff-docs` 分支；7 个 PR（#196 / #199 / #201 / #202 / #203 / #204 / #206）各收到一条评审评论；[issue #208](https://github.com/elysia395/dsh-wallpaper-engine/issues/208)（GPU 抓帧缓存名逼近 NAME_MAX）与 [issue #209](https://github.com/elysia395/dsh-wallpaper-engine/issues/209)（模块拆分带来的移植负担）已开。**`main` 未合并**：`origin/main` 无分支保护、也没有任何 PR 有 review 记录，合并应由维护者评审 [PR #207](https://github.com/elysia395/dsh-wallpaper-engine/pull/207) 后决定；`#196` 仍可单独 fast-forward。
 
 ### 5.2 遗留问题清单
 

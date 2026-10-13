@@ -1,15 +1,15 @@
 # GITHUB-HANDOFF — 社区 PR 批量整合回灌文稿
 
 - 仓库：`elysia395/dsh-wallpaper-engine`
-- 本文件是**本地产物**：未 push、未开新 PR、未在 GitHub 发任何评论、未合并 main。
+- **已回灌（2026-10-13）**：代码分支 `integration/pr-batch`（PR [#207](https://github.com/elysia395/dsh-wallpaper-engine/pull/207)）与本文件所在的 `integration/handoff-docs` 分支均已 push；7 个 PR 各发一条评论；issue [#208](https://github.com/elysia395/dsh-wallpaper-engine/issues/208) / [#209](https://github.com/elysia395/dsh-wallpaper-engine/issues/209) 已开。**未合并 `main`**（留给评审）。
 - 所有实测数字来自 `PR-BATCH-INTEGRATION-REPORT.md`（同仓库，169 行），并已在本地整合线复核。
-- 复核分支：`integration/pr-batch` @ `419b6fe`（基于 `877952e` 的**拆分后模块布局**，即 `src/styles.js` 已只剩 31 行组装点的那条线）。
+- 复核分支：`integration/pr-batch` @ `623fe1f`（基于 `877952e` 的**拆分后模块布局**，即 `src/styles.js` 已只剩 31 行组装点的那条线）。
 
 ---
 
 ## 0. 使用说明
 
-本文件里没有任何远端动作已经发生。以下命令与文稿模板都只在本地跑、只由人来发。
+本文件里的文稿已于 2026-10-13 回灌：分支与 PR 已 push / 开，7 条评论已发，2 个 issue 已开；`main` 未合并。
 
 **给 PR 作者（@jassdingk / @tangdogdaihuman / @Fish-under-sea / @yuxilao / @elysia395 / @oneincase）**
 直接取 `## 1. 每个 PR 一条评论稿` 里属于你的那一节，全文粘到对应 PR 的评论框。里面写清了：本 PR 在本地整合线跑过的判据、值不值得合、以及（如果有）必须修掉的 P1。P1 的定位与实测数字都给了，按它改即可。
@@ -309,20 +309,24 @@ node test/run-guards.mjs all
 # 4) 产物同步（链内已有 [1/70] npm run build + [2/70] verify-client-sync）
 npm run build && git diff --stat lib/client.js
 
-# 5) 要回灌时的远端动作（本轮全部未执行，见下）
-git push origin <per-pr-branch>
-gh pr create --base main --head <per-pr-branch>
-gh pr comment <N> --body-file <本文件对应小节>
+# 5) 回灌时的远端动作
+git push origin integration/pr-batch        # 代码线
+git push origin integration/handoff-docs    # 报告 + 补丁（本文件所在分支）
+gh pr create --base main --head integration/pr-batch
+gh pr comment <N> --body-file /tmp/gh/pr<N>.md
+gh issue create --title ... --body-file /tmp/gh/issue-A.md
 ```
 
-### 本轮**未执行**的远端步骤，各需谁点头
+### 远端步骤执行状态（2026-10-13 已回灌）
 
-| 步骤 | 状态 | 需要谁决定 |
+| 步骤 | 状态 | 结果 |
 |---|---|---|
-| `git push` 整合分支 / 各 PR 分支 | **未执行** | 仓库维护者（推 fork 则对应作者） |
-| 在 GitHub 上开新 PR | **未执行** | 仓库维护者 |
-| 在 7 个 PR 下发评论 | **未执行** | 仓库维护者或各 PR 作者（本文件只是可直接粘贴的草稿） |
-| 合并进 `main` | **未执行** | 仓库维护者；`origin/main` 无分支保护（`branches/main/protection` → 404），且**没有任何 PR 有 review 记录**（`reviewDecision` 全空），所以 GitHub 侧「可合」只由 CI 与 mergeable 决定 |
+| `git push` 代码分支 | **已执行** | `integration/pr-batch` @ `623fe1f`（相对 `main` 111 笔；其中 `877952e..623fe1f` 为本次 19 笔） |
+| `git push` 报告与补丁 | **已执行** | `integration/handoff-docs` @ `7291a70`（含本文件、报告、`patches/` 8 个补丁） |
+| 开整合 PR | **已执行** | [#207](https://github.com/elysia395/dsh-wallpaper-engine/pull/207)（base `main`） |
+| 7 个 PR 各发一条评论 | **已执行** | [#196](https://github.com/elysia395/dsh-wallpaper-engine/pull/196#issuecomment-6149007848) / [#199](https://github.com/elysia395/dsh-wallpaper-engine/pull/199#issuecomment-6149008645) / [#201](https://github.com/elysia395/dsh-wallpaper-engine/pull/201#issuecomment-6149009651) / [#202](https://github.com/elysia395/dsh-wallpaper-engine/pull/202#issuecomment-6149010490) / [#203](https://github.com/elysia395/dsh-wallpaper-engine/pull/203#issuecomment-6149011306) / [#204](https://github.com/elysia395/dsh-wallpaper-engine/pull/204#issuecomment-6149012030) / [#206](https://github.com/elysia395/dsh-wallpaper-engine/pull/206#issuecomment-6149012704) |
+| 开 issue | **已执行** | [issue #208](https://github.com/elysia395/dsh-wallpaper-engine/issues/208)（NAME_MAX）/ [issue #209](https://github.com/elysia395/dsh-wallpaper-engine/issues/209)（拆分移植负担） |
+| 合并进 `main` | **未执行（有意）** | 留给评审：`origin/main` 无分支保护（`branches/main/protection` → 404），且**没有任何 PR 有 review 记录**（`reviewDecision` 全空），所以 GitHub 侧「可合」只由 CI 与 mergeable 决定；`#196` 仍可单独 fast-forward |
 
 ### 判定口径备注（维护者用）
 
