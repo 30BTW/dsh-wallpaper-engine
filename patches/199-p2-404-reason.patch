@@ -1,0 +1,132 @@
+From ff3df77e9b06054d6704a9f098663c527d1a4222 Mon Sep 17 00:00:00 2001
+From: oneincase <462534624@qq.com>
+Date: Tue, 13 Oct 2026 22:00:31 +0800
+Subject: [PATCH] =?UTF-8?q?fix(presets):=20#199=20=E5=90=8E=E7=BB=AD=20?=
+ =?UTF-8?q?=E2=80=94=E2=80=94=20404=20=E7=9A=84=E5=9B=A0=E6=9E=9C=E4=B8=A4?=
+ =?UTF-8?q?=E5=88=86=EF=BC=9A=E8=B7=AF=E7=94=B1=E5=9C=A8=E3=80=81=E9=A2=84?=
+ =?UTF-8?q?=E8=AE=BE=E7=9C=9F=E6=B2=A1=E4=BA=86=E5=88=AB=E5=86=8D=E5=8F=AB?=
+ =?UTF-8?q?=E4=BA=BA=E9=87=8D=E5=90=AF=20DSH?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+承接上一笔的判据：`glassPresetFailureReason()` 原本只按「404 + error==='unknown preset'」
+归「重启 DSH」，可 #199 之后的宿主会给同一 404 带上 `reason` —— `missing`（真不存在）
+/ `tombstone`（出厂预设已删除）。这两种情况下**路由是在的**，重启 DSH 一点用都没有，
+用户按提示重启只会再看到同一条错误。
+
+- `src/preset-store.js`（`glassPresetFailureReason`，:95-111）：先看 `reason`，
+  `tombstone` ⇒「这份出厂预设已被删除 —— 刷新清单后会从列表里消失」，
+  `missing` ⇒「这份预设不存在了 —— 可能已被删掉，刷新清单后再选一份」，
+  **没有 `reason`**（旧宿主 / 升级窗口期）才归「重启 DSH」那条。裸状态码 404/405 的
+  老语义（无信封 ⇒ 重启）原样不动。
+- `src/i18n-copy-glass.js`：两条新文案进词表（中文原文作键 + 英文），不硬编码在逻辑里。
+  词表是唯一来源，verify-i18n 的双向对齐与零裸中文口径不动。
+- `test/verify-presets.mjs` ④c 段：新增「三条出路两两不同」「三条都在词表里且英文非空、
+  不是中英同形」两条**真跑分类函数**的判据，外加一条 in-test 负对照（把 `reason` 两分
+  整块拿掉 ⇒ 判据必须判红）。
+- 产物：`src/` 有改动 ⇒ `node scripts/build-client.mjs` 重建 `lib/client.js`（4526218 B）。
+
+先红后绿（回退树见上一笔 commit message 的回退实验；本笔的变异树）：
+
+  $ cp -a 树 /tmp/p1-199-p2nc && 删掉 src/preset-store.js 里两段 `reason` 分支
+  $ node scripts/build-client.mjs && node test/verify-presets.mjs
+  ✗ ★ #199-P2：三条出路两两不同（窗口期 / 真不存在 / 已删除，不许并成一句）
+     — missing=宿主里没有玻璃预设路由：重启 DSH 后再试 tomb=宿主里没有玻璃预设路由：重启 DSH 后再试
+  ✗ negative control: 把 reason 两分拿掉（三条并回一句）会被判出（判据有牙） — 变异没生效（负对照空转）
+  exit=1（修好的树上同一文件 ALL PRESET SNAPSHOT CHECKS PASSED (225)）
+
+验收：`node test/verify-presets.mjs` = 225；`run-guards verify` = 57/57、`docs` = 6/6、
+`smoke` = 6/6；`npm run verify:static` = ALL STATIC GATE CHECKS PASSED；
+`node test/verify-client-sync.mjs` = CLIENT SYNC CHECKS PASSED (5)。
+
+本笔不动 `test/run-guards.mjs` / `docs/GUARD-MAP.md` / fixtures —— 判据全部加在既有
+`test/verify-presets.mjs` 里，没有新增守卫文件，因此无需重冻结 `test/fixtures/verify-chain.json`。
+---
+ src/i18n-copy-glass.js  |  2 ++
+ src/preset-store.js     | 16 +++++++++++++---
+ test/verify-presets.mjs | 24 ++++++++++++++++++++++++
+ 3 files changed, 39 insertions(+), 3 deletions(-)
+
+diff --git a/src/i18n-copy-glass.js b/src/i18n-copy-glass.js
+index f5f96df..8f340e0 100644
+--- a/src/i18n-copy-glass.js
++++ b/src/i18n-copy-glass.js
+@@ -82,6 +82,8 @@ const WE_I18N_EN_GLASS = {
+ 
+   // ── 玻璃预设（src/preset-store.js / src/glass-panel.js）────────────────────
+   "宿主里没有玻璃预设路由：重启 DSH 后再试（改过宿主代码要重挂，刷新页面不够）": "No glass-preset routes in the host: restart DSH and try again (changed host code needs a remount — refreshing the page is not enough)",
++  "这份出厂预设已被删除 —— 刷新清单后会从列表里消失": "This built-in preset was deleted — refresh the list and it will drop out of it",
++  "这份预设不存在了 —— 可能已被删掉，刷新清单后再选一份": "This preset no longer exists — it may have been deleted; refresh the list and pick another",
+   "先给预设起个名字": "Name your preset first",
+   "预设方案": "Presets",
+   "胶囊雾化": "Capsule frost",
+diff --git a/src/preset-store.js b/src/preset-store.js
+index 5222991..b8b4d2b 100644
+--- a/src/preset-store.js
++++ b/src/preset-store.js
+@@ -89,10 +89,20 @@ function glassPresetFailureReason(res) {
+   }
+   // ⚠️ 404 **带** JSON body 也会漏英文给用户（#188）：宿主 404 `{"error":"unknown preset"}`
+   //    时 `bare` 为 false ⇒ 原句直落 `hostFailureReason` ⇒ "unknown preset" 原样上屏。
+-  //    这句英文没有中文键、也没查 weT。已知 error 值的 404 归并到同一条"重启 DSH"的
+-  //    出路文案 —— 升级窗口期（新客户端 + 旧后端）里，弹窗/卡片的所有动作都必然
+-  //    失败，出路都是重启，不是"该重存"（那是 422 version-obsolete 的语义）。
++  //    这句英文没有中文键、也没查 weT。
++  // **因果两分**（#199 的后续）：新宿主会把这个 404 的**原因**写进 body 的 `reason`
++  //    —— `missing`（真的没有这份预设）/ `tombstone`（出厂预设已被删除）—— 这两种
++  //    情况下路由是在的，重启 DSH 一点用都没有 ⇒ 各给一条能走下去的出路；只有
++  //    **没有 reason**（旧宿主，或 #199 之前的宿主）才归"重启 DSH"：那一刻通常是
++  //    升级窗口期（新客户端 + 旧后端），卡片/弹窗的动作必然失败，出路就是重启，
++  //    不是"该重存"（那是 422 version-obsolete 的语义）。
+   if (res.status === 404 && res.data && res.data.error === "unknown preset") {
++    if (res.data.reason === "tombstone") {
++      return weT("这份出厂预设已被删除 —— 刷新清单后会从列表里消失");
++    }
++    if (res.data.reason === "missing") {
++      return weT("这份预设不存在了 —— 可能已被删掉，刷新清单后再选一份");
++    }
+     return weT("宿主里没有玻璃预设路由：重启 DSH 后再试（改过宿主代码要重挂，刷新页面不够）");
+   }
+   return hostFailureReason(res);
+diff --git a/test/verify-presets.mjs b/test/verify-presets.mjs
+index 278c0b7..01e7dec 100644
+--- a/test/verify-presets.mjs
++++ b/test/verify-presets.mjs
+@@ -1927,9 +1927,33 @@ section('④c #199 失败文案：404 不再把宿主英文原句直落上屏，
+       && !/^HOST-EN:/.test(window404),
+       'missing=' + String(missing404).slice(0, 24) + ' tomb=' + String(tomb404).slice(0, 24));
+     // 词表对齐：文案的**唯一**来源是词表键（中文原文作键），客户端不许出现未登记的散句。
++    const dictOk = (keys) => keys.every((k) => dictEn(k).trim().length > 0 && dictEn(k) !== k);
+     check('词表对齐：「重启 DSH」那条在 src/i18n-copy 里、英文非空且不是中英同形',
+       dictEn(RESTART).trim().length > 0 && dictEn(RESTART) !== RESTART,
+       dictEn(RESTART).slice(0, 44) || '词表里找不到这条键');
++    // ★ 因果三分（#199 的 P2）：路由**在**、预设真没了 ⇒ 出路不是"重启 DSH"（重启没用）。
++    //   窗口期（无 reason）/ 真不存在（missing）/ 已删除（tombstone）必须三条不同的出路，
++    //   且每条都从词表来；把三条并回一句就判红。
++    const threeWay = (v) => v.missing !== RESTART && v.tomb !== RESTART && v.missing !== v.tomb;
++    check('★ #199-P2：三条出路两两不同（窗口期 / 真不存在 / 已删除，不许并成一句）',
++      threeWay({ missing: missing404, tomb: tomb404 }),
++      'missing=' + String(missing404).slice(0, 22) + ' tomb=' + String(tomb404).slice(0, 22));
++    check('★ #199-P2：三条出路都在 src/i18n-copy 里，英文非空且不是中英同形',
++      dictOk([RESTART, missing404, tomb404]),
++      [RESTART, missing404, tomb404].map((k) => (dictOk([k]) ? 'ok' : '缺/同形')).join(','));
++    // 负对照：把 reason 两分整块拿掉（回到 #199 原文的"一句到底"）⇒ 上面两条必须判红。
++    const mergedFn = fn
++      .replace(/\n\s*if \(res\.data\.reason === "tombstone"\) \{[\s\S]*?\n\s*\}/, '')
++      .replace(/\n\s*if \(res\.data\.reason === "missing"\) \{[\s\S]*?\n\s*\}/, '');
++    const classifyMerged = new Function('weT', 'hostFailureReason', mergedFn + '\nreturn glassPresetFailureReason;')(
++      (k) => String(k), (res) => 'HOST-EN:' + String((res && res.data && res.data.error) || ''));
++    check('negative control: 把 reason 两分拿掉（三条并回一句）会被判出（判据有牙）',
++      mergedFn !== fn
++      && !threeWay({
++        missing: classifyMerged({ status: 404, data: { error: 'unknown preset', reason: 'missing' } }),
++        tomb: classifyMerged({ status: 404, data: { error: 'unknown preset', reason: 'tombstone' } }),
++      }),
++      mergedFn === fn ? '变异没生效（负对照空转）' : '变异生效且判红');
+   }
+ }
+ 
+-- 
+2.54.0 (Apple Git-157)
+

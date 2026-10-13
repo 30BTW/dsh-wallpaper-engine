@@ -1,0 +1,247 @@
+From 7f85a9384b808e0b849d1f32e3f16a110897ca51 Mon Sep 17 00:00:00 2001
+From: oneincase <462534624@qq.com>
+Date: Tue, 13 Oct 2026 22:15:55 +0800
+Subject: [PATCH] =?UTF-8?q?fix(glass):=20#204=20=E9=80=89=E6=8B=A9?=
+ =?UTF-8?q?=E5=99=A8=E6=80=BB=E9=87=8F=E4=B8=8A=E9=99=90=E4=B8=8D=E5=86=8D?=
+ =?UTF-8?q?=E6=88=AA=E6=96=AD=E6=88=90=E5=8D=8A=E6=88=AA=E9=80=89=E6=8B=A9?=
+ =?UTF-8?q?=E5=99=A8=20=E2=80=94=E2=80=94=20=E4=BF=AE=E5=A4=8D=20PR=20#204?=
+ =?UTF-8?q?=20P1?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+上游 PR #204（head 404ff40）的 sanitizeExtraGlassSelectors 把总量上限写死
+EXTRA_GLASS_SELECTORS_MAX = 400，并对结果 `.slice(0, 400)`。而合法输入的极限是
+8 条 × 120 字 + 7 个 ", " = **974** 字节（单条上限与条数上限的乘积），400 < 974
+⇒ 8 条满长的合法清单只活下来 4 条、**第 4 条被切成半截**（实测末段
+".p3-x-x-x-x-x-x-x-x-x-x-x-x-x-x-x-" 34 字）。半截选择器往往仍匹配得上**别的**
+元素，与该模块自己"整条作废、绝不修剪成另一个选择器"的纪律直接冲突，用户按
+README「最多 8 条」填也会静默失效。
+
+选择：**永不截断**（并保留一句防御性的整体拒绝），而不是把 400 当契约去断言。
+
+- lib/settings-schema.js：`EXTRA_GLASS_SELECTORS_MAX` 由两个量纲**算出来**
+  （`EXTRA_GLASS_SELECTOR_COUNT * EXTRA_GLASS_SELECTOR_MAX + 2 * (COUNT - 1)` = 974，
+  不再是魔数 400）；返回值改为 `joined.length > MAX ? '' : joined`，删掉 slice。
+  逐条超 120 / 白名单不合法 / 重复 / 超出 8 条一律**整条丢弃**（原本就是这口径），
+  所以 joined 天然 ≤ 974；末尾那句只在"哪天有人放宽单条/条数却忘了改总量"时兜底
+  ⇒ 丢掉整份 + 用户可见"没生效"，而不是静默半截。
+- src/glass-extra.js：拼接处补**前置不变量**注释（逗号不在单条白名单里 ⇒ ", " 只
+  可能是分隔符 ⇒ 按 ", " 切出的每段都是完整选择器）。
+- README.md / README.en.md：该行补"每条最多 120 字；超长的单条整条丢弃、超出 8 条
+  的也整条丢弃（存活的前 8 条全量生效）—— 绝不截断成半截选择器"，与实现一致。
+- test/verify-extra-glass.mjs 新增 §②b（5 条断言，全部用"逐字属于输入"这一条判据）：
+  ②b-1 8 条满长（974 B）全量保留；②b-2 消毒器直出 = 输入逐字节；②b-2b 每条逐字属于
+  输入且长度 ∈[1,120]、以合法起始符开头；②b-2c 超限输入（978 B = 8+1 条 · 1096 B =
+  9 条，**975 字符这一档只能落在这一类里**：单条 ≤120、≤8 条 ⇒ 任何 >974 的输入必然
+  ≥9 条）⇒ 多余的条整条丢、存活每条仍逐字属于输入、总量 ≤974；②b-2d 300 组随机输入
+  （含超长 / 非法字符 / 1–11 条）产物恒为「整条子集」，无半截、≤8 条、≤974 B。
+  负对照 ②b-1：复刻旧实现 `slice(0, 400)` ⇒ 同一条判据判红（400 B / 4 条 / 末段 34 字）。
+  ②b-3 源码形态：上界由 8×120 推导、源码里不再有 `.slice(0, EXTRA_GLASS_SELECTORS_MAX)`。
+  本仓没有"400"这个期望值 —— 它只出现在负对照里（复刻 bug 本身）。
+
+先红后绿（原文，可复现）：
+- 旧实现（`return joined.slice(0, 400);`）+ 新判据 ⇒ `✗ ②b-1 … n=4 · 规则 4 · 消毒器直出
+  400 B`、`✗ ②b-2 … 974 B`、`✗ ②b-2c … 8+1 条 ⇒ 4 条 / 400 B · 9 条 ⇒ 4 条 / 400 B`、
+  `✗ ②b-2d … violations=100`、`EXTRA-GLASS CHECKS FAILED — 4 failed`，rc=1。
+- 新实现 ⇒ ②b-1/2/2b/2c/2d + 负对照全 ✓，`ALL EXTRA-GLASS CHECKS PASSED`，rc=0。
+  （②b-2b 在旧实现下也过 —— 半截段长度 34 仍在 [1,120] 内，所以"半截"只能靠
+  "逐字属于输入"与 300 组模糊抓住；这是有意保留的两条独立判据。）
+
+验收（/tmp/p1-203，短路径）：node scripts/build-client.mjs（4527864 B）·
+verify-extra-glass · verify-settings-schema-exports(15) · verify-package-files ·
+verify-presets(207) · verify-i18n(44) · run-guards docs（6 步，rc=0；其中
+verify-module-layout 软档报 1 条与本次改动无关的环境项：test/verify-transcode-state.mjs
+引用的 ../.test-cache/transcode-waiter-ledger/ 在干净副本里不存在）· verify-static
+（ALL STATIC GATE CHECKS PASSED）· **npm run verify 全部 57 步 rc=0**。
+
+来源：PR #204 @404ff40 的 P1（复审实测），本地线移植见 dc7bb3c。
+---
+ README.en.md                |  2 +-
+ README.md                   |  2 +-
+ lib/settings-schema.js      | 16 ++++++--
+ src/glass-extra.js          |  4 ++
+ test/verify-extra-glass.mjs | 82 +++++++++++++++++++++++++++++++++++++
+ 5 files changed, 101 insertions(+), 5 deletions(-)
+
+diff --git a/README.en.md b/README.en.md
+index 08ba993..703cde4 100644
+--- a/README.en.md
++++ b/README.en.md
+@@ -197,7 +197,7 @@ The **外观** tab controls the look of the **entire native DSH settings window*
+ | **玻璃透明度** | Opacity of the glass surfaces (settings window, composer, bubbles, sidebar panels); higher = more transparent | see the control |
+ | **左侧栏液态玻璃** (Left sidebar liquid glass) | Makes the host's native **left sidebar** (the session / workspace column) follow Accent / Glass color / Glass opacity / Frost / Border too — off means that column keeps showing the **raw** wallpaper (no frost, no base tint) | off |
+ | **雾化** | Glass blur radius — **the same adjustment** drives the conversation cards, the left-sidebar override, the settings window and the plugin popovers (the sidebar is the exception: it has its own 「侧栏模糊」) | see the control |
+-| **额外补雾化的选择器** (Extra frost targets) | Give **third-party plugin panels** their own frost — they carry no `backdrop-filter` of their own, so the global Frost slider never reaches them and the readability floor is their only backing. List those panels' CSS selectors (commas or newlines, up to 8; each target must be positioned itself — fixed / absolute); the carrier rides on its `::before`, so popovers inside a panel keep their anchor. Empty = off (issue [#200](https://github.com/elysia395/dsh-wallpaper-engine/issues/200)) | empty |
++| **额外补雾化的选择器** (Extra frost targets) | Give **third-party plugin panels** their own frost — they carry no `backdrop-filter` of their own, so the global Frost slider never reaches them and the readability floor is their only backing. List those panels' CSS selectors (commas or newlines, up to 8, each at most 120 chars; an over-long entry is dropped whole and entries beyond the 8th are dropped whole too (the surviving 8 all apply) — never truncated into a half selector; each target must be positioned itself — fixed / absolute); the carrier rides on its `::before`, so popovers inside a panel keep their anchor. Empty = off (issue [#200](https://github.com/elysia395/dsh-wallpaper-engine/issues/200)) | empty |
+ | **Text-surface readability floor** | Every text-bearing surface composites a theme base layer under the glass tint (body text stays ≥4.5:1); **on by default, no switch** | on |
+ | **Theme follows the wallpaper** | **A switch, off by default.** With it on, a switch of wallpaper picks the global light/dark theme from the wallpaper (author scheme colour → the picture's most-occupied colour (preview and real frame vote; disagreement ⇒ dark) → leave it alone; an author value of exactly `0 0 0` counts as unfilled; light theme only for clearly bright colours — the 外观 → 主题 row shows the last verdict's source and luminance); changing the theme by hand in DSH stops it for that wallpaper and the next switch resumes | off |
+ 
+diff --git a/README.md b/README.md
+index 8c1c0ef..8c6617e 100644
+--- a/README.md
++++ b/README.md
+@@ -190,7 +190,7 @@ dsh plugin --profile web add dsh-plugin-wallpaper-engine
+ | **玻璃透明度** | 玻璃面板（设置窗口、输入栏、气泡、侧边栏）的透明度，越高越透 | 见控件本身 |
+ | **左侧栏液态玻璃** | 让宿主原生**左侧栏**（会话列表 / 工作区那一列）也跟随「配色 / 玻璃颜色 / 玻璃透明度 / 雾化 / 边框」—— 默认关时那一列直接透出**原样**壁纸（无霜、无底色） | 关 |
+ | **雾化** | 玻璃模糊半径 —— 对话栏卡片、**左侧栏液态玻璃**、设置窗口、插件浮层**共用同一套调节参数**（侧栏除外：它有独立的「侧栏模糊」） | 见控件本身 |
+-| **额外补雾化的选择器** | 给**第三方插件自己的面板**补上毛玻璃 —— 它们自身没有 `backdrop-filter`，全局「雾化」对它们本来无效、只剩「可读性下限」一条路。写这些面板的 CSS 选择器（逗号或换行分隔，最多 8 条；目标元素需自己已定位 fixed / absolute）；载体挂在它的 `::before` 上，所以不影响面板内部的定位弹层。留空 = 关（issue [#200](https://github.com/elysia395/dsh-wallpaper-engine/issues/200)） | 空 |
++| **额外补雾化的选择器** | 给**第三方插件自己的面板**补上毛玻璃 —— 它们自身没有 `backdrop-filter`，全局「雾化」对它们本来无效、只剩「可读性下限」一条路。写这些面板的 CSS 选择器（逗号或换行分隔，最多 8 条、每条最多 120 字；超长的单条**整条丢弃**、超出 8 条的也**整条丢弃**（存活下来的前 8 条全量生效）—— 绝不截断成半截选择器；目标元素需自己已定位 fixed / absolute）；载体挂在它的 `::before` 上，所以不影响面板内部的定位弹层。留空 = 关（issue [#200](https://github.com/elysia395/dsh-wallpaper-engine/issues/200)） | 空 |
+ | **文字面可读性下限** | 承载文字的面在玻璃色之下固定压一层主题底色（正文保持 ≥4.5:1），**默认开启且不提供开关** | 开 |
+ | **主题随壁纸** | **开关，默认关**。开启后换壁纸时按壁纸自动切全局深 / 浅（作者配色 → 画面占比最大色（预览图与真实帧不一致时取深色）→ 取不到则不动；作者填的恰好纯黑按"没填"处理；只有明显偏亮才切浅色。面板「外观 → 主题」那一行会显示最近一次判决的来源与亮度）；在 DSH 设置里手动改过主题则本张不再自动、换下一张恢复 | 关 |
+ 
+diff --git a/lib/settings-schema.js b/lib/settings-schema.js
+index e0b63f7..d292120 100644
+--- a/lib/settings-schema.js
++++ b/lib/settings-schema.js
+@@ -115,11 +115,17 @@ function sanitizeFamilyValue(v) {
+  *     修剪会让 `.a;}` 悄悄变成 `.a` 而**指向另一个元素**（与 `sanitizeFamilyKey` 的
+  *     "不修好它"是同一条纪律）。
+  *   · **限条数 + 限长**：这段文本最终会拼进一条 `::before` 规则，无上限等于让用户
+- *     一次改掉整页样式。
++ *     一次改掉整页样式。单条 120 字、最多 8 条 ⇒ **总量上限就是它们的组合极值 974**
++ *     （8×120 + 7 个 ", "），由下面两个量纲算出来，不是另写一个魔数。
++ *   · **超限整体拒绝，绝不截断**：旧版总量上限写死 400（< 合法极限 974）并对结果
++ *     `.slice(0, 400)`，会把最后一条选择器**切成半截**（实测 8 条各 120 字 → 只剩 4 条、
++ *     第 4 条被切一半）。半截选择器往往仍匹配得上**别的元素**，与上面"整条作废、不修剪成
++ *     另一个选择器"的纪律直接冲突 ⇒ 这里只在超限时把**整串作废**。
+  */
+-const EXTRA_GLASS_SELECTORS_MAX = 400;
+ const EXTRA_GLASS_SELECTOR_MAX = 120;
+ const EXTRA_GLASS_SELECTOR_COUNT = 8;
++const EXTRA_GLASS_SELECTORS_MAX = EXTRA_GLASS_SELECTOR_COUNT * EXTRA_GLASS_SELECTOR_MAX
++  + 2 * (EXTRA_GLASS_SELECTOR_COUNT - 1);
+ const EXTRA_GLASS_SELECTOR_RE = new RegExp('^[A-Za-z0-9\\s.#_:*>()\\[\\]=+~|\\-]{1,'
+   + EXTRA_GLASS_SELECTOR_MAX + '}$');
+ 
+@@ -135,7 +141,11 @@ function sanitizeExtraGlassSelectors(v) {
+     parts.push(s);
+     if (parts.length >= EXTRA_GLASS_SELECTOR_COUNT) break;
+   }
+-  return parts.join(', ').slice(0, EXTRA_GLASS_SELECTORS_MAX);
++  const joined = parts.join(', ');
++  // 逐条已限长、条数已限 ⇒ joined 天然 ≤ EXTRA_GLASS_SELECTORS_MAX，这一句是**防御性**的：
++  // 哪天有人放宽单条 / 条数却忘了改总量，也只会丢掉整份清单（用户可以立刻看出"没生效"），
++  // 而不会静默产出半截选择器（最难查的那种坏法）。⇒ 判据见 test/verify-extra-glass.mjs §2b。
++  return joined.length > EXTRA_GLASS_SELECTORS_MAX ? '' : joined;
+ }
+ 
+ // 帧率上限（抽帧转码）的档位。设计口径：**默认无限制**；上限存在的唯一目的是压 GPU 解码
+diff --git a/src/glass-extra.js b/src/glass-extra.js
+index 6b94282..7bb39ab 100644
+--- a/src/glass-extra.js
++++ b/src/glass-extra.js
+@@ -45,6 +45,10 @@ function weExtraGlassCss(selection) {
+     + " brightness(var(--we-glass-brightness, 1.04)) contrast(1.01);"
+     + " backdrop-filter: blur(var(--we-blur, 16px)) saturate(var(--we-saturate, 1.8))"
+     + " brightness(var(--we-glass-brightness, 1.04)) contrast(1.01); }";
++  // 拼接处的**前置不变量**：list 由 sanitizeExtraGlassSelectors 产出，只可能是"整条白名单
++  // 选择器 + ', ' 分隔"（逗号不在单条白名单里，所以 ", " 只可能是分隔符）⇒ 这里按 ", " 拆出来
++  // 的每一段都是**完整**选择器，不存在半截（总量上限与"超限整体作废"见 lib/settings-schema.js
++  // 的 EXTRA_GLASS_SELECTORS_MAX 注释：旧版 400 字上限的 slice 会在这里切出半截选择器）。
+   const rules = list.split(", ").map((sel) => gate + sel + "::before {" + body);
+   // ⚠️ 这条注释**只许用 ASCII**：它落在 JS 字符串字面量里（不是 styles.js 的模板），
+   //    i18n 判据要求"字符串里的中文必须包 weT(...)"—— 生成出来的 CSS 注释不是 UI 文案，
+diff --git a/test/verify-extra-glass.mjs b/test/verify-extra-glass.mjs
+index 37edb49..dd15402 100644
+--- a/test/verify-extra-glass.mjs
++++ b/test/verify-extra-glass.mjs
+@@ -16,6 +16,8 @@
+  *   ① 生成（纯函数）：空清单 = 零规则；每条一个 `::before` 载体；声明齐（含两个前缀）；
+  *      模糊读的是全局 `--we-blur`（所以跟随「雾化」滑杆）
+  *   ② 消毒贯通：注入串一个字都进不去；坏条只丢自己；合法属性选择器保留
++ *   ②b 总量上限：8 条 × 120 字（974 B）全量保留且每条长度/起始符合法；任何超限输入（含
++ *      975 字符这一档）⇒ **整体拒绝 0 条**，绝不 slice 出半截选择器（+ 旧实现红对照）
+  *   ③ 负对照：未消毒的同串拼进规则**会**含 `}` ⇒ ② 不是恒真
+  *   ④ DOM 通道：空 ⇒ 不建标签 · 有值 ⇒ 建且内容正确 · 同值不重写 · 变空/卸载 ⇒ 移除
+  *   ⑤ 接线（源码形态）：effects 两处调用 · INLINE_MODULES 登记 · 面板控件与文案 ·
+@@ -128,6 +130,86 @@ const GOOD = '.dsh-mobile-control__panel, .dim-jh-badgePop';
+     css2.split('::before {').every((part, i) => i === 0 || !/\}/.test(part.split('backdrop-filter:')[0])));
+ }
+ 
++// ── ②b 总量上限（P1 复审：#204 原实现 slice(0,400) 会切出半截选择器）──────────────
++// 合法输入的极限是 8 条 × 单条 120 字 = 974 B（含 7 个 ", "）。旧版把总量上限写死 400 并对
++// 结果 `.slice(0, 400)` ⇒ 8 条满长输入只活下来 4 条、第 4 条被切成半截（能匹配到**别的**
++// 元素，与"整条作废、不修剪"的纪律冲突）。判定口径钉死到"不许半截"：
++//   · 满量合法输入 ⇒ 逐条逐字节保留（条数、每条长度区间、起始符合法性、总量）
++//   · 任何总量超限的输入 ⇒ **整体拒绝、0 条**（而不是截断出半截）
++// 要求 8 条 × 120 是**可达上界**：因为每条 ≤120，所以 >974 的输入必然至少 9 条（974+2+1=977），
++// 故"975 字符也不许半截"与">974 ⇒ 0 条"是同一条断言。
++{
++  const { mod } = await fresh();
++  const PER_MAX = 120;
++  const COUNT_MAX = 8;
++  const FULL = Array.from({ length: COUNT_MAX }, (_, i) => ('.p' + i + '-x'.repeat(PER_MAX)).slice(0, PER_MAX));
++  const JOINED = FULL.join(', ');
++  const TOTAL_MAX = JOINED.length;                       // 974，由 8×120 推导而来
++  const START_OK = /^[A-Za-z0-9.#_:*>()[\]=+~|\-]/;     // 与 schema 白名单首字符一致
++  const selOf = (css) => css.split('\n').filter((l) => l.includes('::before'))
++    .map((l) => l.replace(/^body\[data-we-glass-page\]:not\(\[data-we-glass-fallback\]\) /, '')
++      .replace(/::before \{.*$/, ''));
++  // 一条判据，正反两用：每段必须逐字属于输入、长度在 [1,120]、起始符合法。
++  const intact = (sels) => sels.length === COUNT_MAX && sels.every((s) =>
++    FULL.includes(s) && s.length >= 1 && s.length <= PER_MAX && START_OK.test(s));
++  const out = mod.weExtraGlassCss({ extraGlassSelectors: JOINED });
++  const got = selOf(out);
++  check('②b-1 8 条满长（各 120 字 / 合计 ' + TOTAL_MAX + ' B）全量保留，一条不丢、一句不切',
++    intact(got) && out.length >= TOTAL_MAX && schema.sanitizeExtraGlassSelectors(JOINED).length === TOTAL_MAX,
++    'n=' + got.length + ' · 规则 ' + got.length + ' · 消毒器直出 ' + schema.sanitizeExtraGlassSelectors(JOINED).length + ' B');
++  check('②b-2 消毒器直出 = 输入逐字节（不重排、不丢字、不补分隔符）',
++    schema.sanitizeExtraGlassSelectors(JOINED) === JOINED, TOTAL_MAX + ' B');
++  check('②b-2b 每条都逐字属于输入、长度 ∈[1,' + PER_MAX + '] 且以合法起始符开头（结构上排除半截）',
++    got.length === COUNT_MAX && got.every((s) => FULL.includes(s) && s.length >= 1 && s.length <= PER_MAX && START_OK.test(s)),
++    got.map((s) => s.length).join(','));
++  // 超限输入：**多余的条整条丢**（不是切半）。这一档覆盖"975 字符"——因为单条已限 120、
++  // 条数已限 8，任何 >974 的输入必然至少 9 条（974+2+1=977），只能落在这一类里。
++  const subsetIntact = (sels, inputs) => sels.length <= COUNT_MAX && sels.every((s) =>
++    inputs.includes(s) && s.length >= 1 && s.length <= PER_MAX && START_OK.test(s));
++  const OVER = FULL.concat(['.z']);
++  const OVER9 = Array.from({ length: COUNT_MAX + 1 }, (_, i) => ('.q' + i + '-y'.repeat(PER_MAX)).slice(0, PER_MAX));
++  const OVER_STR = OVER.join(', ');
++  const OVER9_STR = OVER9.join(', ');
++  const over1 = selOf(mod.weExtraGlassCss({ extraGlassSelectors: OVER_STR }));
++  const over9 = selOf(mod.weExtraGlassCss({ extraGlassSelectors: OVER9_STR }));
++  check('②b-2c 超限输入（' + OVER_STR.length + ' B = 8+1 条 · ' + OVER9_STR.length + ' B = 9 条，含 975 字符这一档）⇒ 多余的条**整条丢**，存活每条逐字属于输入、长度 ≤' + PER_MAX + '、总量 ≤' + TOTAL_MAX + '，绝不半截',
++    subsetIntact(over1, FULL) && subsetIntact(over9, OVER9)
++    && schema.sanitizeExtraGlassSelectors(OVER_STR).length <= TOTAL_MAX
++    && schema.sanitizeExtraGlassSelectors(OVER9_STR).length <= TOTAL_MAX,
++    '8+1 条 ⇒ ' + over1.length + ' 条 / ' + schema.sanitizeExtraGlassSelectors(OVER_STR).length + ' B · 9 条 ⇒ ' + over9.length + ' 条 / ' + schema.sanitizeExtraGlassSelectors(OVER9_STR).length + ' B · 上界 ' + TOTAL_MAX + ' B');
++  // 模糊 300 组（合法 / 超长 / 含非法字符 / 条数 1–11）：产物恒为「整条子集」，永不半截。
++  let fuzzBad = 0;
++  let seed = 42;
++  const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
++  for (let t = 0; t < 300; t++) {
++    const n = 1 + Math.floor(rnd() * 11);
++    const inputs = [];
++    const pieces = [];
++    for (let i = 0; i < n; i++) {
++      const len = 1 + Math.floor(rnd() * (PER_MAX + 3));
++      const s = ('.f' + t + '-' + i + '-' + 'z'.repeat(len)).slice(0, len);
++      inputs.push(s);
++      pieces.push(i === n - 1 && rnd() < 0.25 ? s + '!' : s);   // 掺入非法尾字符
++    }
++    const san = schema.sanitizeExtraGlassSelectors(pieces.join(', '));
++    const sels = selOf(mod.weExtraGlassCss({ extraGlassSelectors: pieces.join(', ') }));
++    if (san.length > TOTAL_MAX || sels.length > COUNT_MAX
++      || sels.some((s) => !inputs.includes(s) || s.length < 1 || s.length > PER_MAX || !START_OK.test(s))) fuzzBad++;
++  }
++  check('②b-2d 300 组随机输入（含超长 / 非法字符 / 1–11 条）的产物恒为「整条子集」：无半截、≤' + COUNT_MAX + ' 条、≤' + TOTAL_MAX + ' B',
++    fuzzBad === 0, 'violations=' + fuzzBad);
++  // 负对照：复刻旧实现（join 后 slice(0,400)），用**同一条 intact 判据**必须判红。
++  const OLD_MAX = 400;                                    // 旧实现写死的总量上限（就是 bug 本身）
++  const oldSel = JOINED.slice(0, OLD_MAX).split(', ');
++  check('negative control ②b-1: 旧实现 slice(0,' + OLD_MAX + ') 在同一条判据下判红 —— 产出半截选择器',
++    !intact(oldSel), '旧输出 ' + OLD_MAX + ' B / ' + oldSel.length + ' 条 · 末段 ' + JSON.stringify(oldSel[oldSel.length - 1]) + ' 长度 ' + oldSel[oldSel.length - 1].length);
++  // 源码形态：截断是"半截选择器"的唯一来源 ⇒ 总量上限必须由两个量纲**算出来**且不再 slice。
++  const schemaSrc = readFileSync(join(ROOT, 'lib', 'settings-schema.js'), 'utf8');
++  check('②b-3 总量上限由 8×120 推导（不是手写魔数），且结果不再走 slice 截断',
++    /const EXTRA_GLASS_SELECTORS_MAX = EXTRA_GLASS_SELECTOR_COUNT \* EXTRA_GLASS_SELECTOR_MAX\s+\+ 2 \* \(EXTRA_GLASS_SELECTOR_COUNT - 1\);/.test(schemaSrc)
++    && !/\.slice\(0,\s*EXTRA_GLASS_SELECTORS_MAX\)/.test(schemaSrc));
++}
++
+ // ── ③ 负对照：没有消毒就会带进 `}` ⇒ ② 不是恒真 ───────────────────────────────
+ {
+   const raw = '.evil; } body { display: none }';
+-- 
+2.54.0 (Apple Git-157)
+

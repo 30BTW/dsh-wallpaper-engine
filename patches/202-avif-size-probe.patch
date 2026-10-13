@@ -1,0 +1,446 @@
+From cda81493a0cdd25f128fede9fd3c5d6eaf1823f5 Mon Sep 17 00:00:00 2001
+From: oneincase <462534624@qq.com>
+Date: Tue, 13 Oct 2026 21:55:36 +0800
+Subject: [PATCH] =?UTF-8?q?fix(avatar):=20AVIF=20=E5=B0=BA=E5=AF=B8?=
+ =?UTF-8?q?=E6=8E=A2=E9=92=88=EF=BC=88ISOBMFF/iprp/ipco/ispe=EF=BC=89?=
+ =?UTF-8?q?=E8=A1=A5=E5=85=A8=20=E2=80=94=E2=80=94=20=E4=BF=AE=E5=A4=8D=20?=
+ =?UTF-8?q?PR=20#202=20P1?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+PR #202 给头像导入加了「边长 ≤1024 / 体积 ≤4 MB」两道闸，但 src/avatar-import.js
+的文件头尺寸探针只认 PNG/JPEG/GIF/BMP/WebP 的魔数，AVIF（HEIF 家族的 ISOBMFF）
+一个分支都没有：parseBitmapHeaderSize 恒返 null ⇒ probeImageSize 给 null ⇒
+avatarImportLimit 只按体积判、overEdge 恒 false。实测一个 **354 字节**、声明
+2000×1200 的真实 AVIF（ffmpeg + libsvtav1 编码）直接过闸，随后 createImageBitmap
+把它全量解码成 RGBA ——「先拒再解」的价值在该格式上归零，也正是解码炸弹的形状。
+
+本笔补上 AVIF 解析（沿用「只读头、绝不 decode」的既有路径）：
+
+- 新增 ISOBMFF 盒遍历：isoBoxAt / isoChildren / isoFind（size=0 吃到末尾、
+  size=1 走 64 位 largesize、size 非法即停）；
+- avifKind：扫 ftyp 的 major_brand + 全部 compatible_brands（avif/avis → 'avif'，
+  heic/heix/hevc/hevx/mif1/msf1 → 'heif'）—— 必须从 major_brand 位置开始扫；
+- avifSizeInMeta：meta → iprp → ipco，`meta`/`iprp` 按 FullBox 跳过 4 字节
+  version/flags，`ispe` 用遍历子盒拿到（不假定它是第一个）；有 pitm + ipma 时按属性
+  关联取**主图**那个 ispe（ipma 的 version 0 取 1 字节索引、version 1 取 2 字节，
+  索引低 7 位，关联为 0 表示「未关联」要跳过），取不到就退回属性列表里第一个 ispe；
+- parseAvifSize：先按 ftyp→meta 盒链走，够不到 meta 时在头内做一次候选盒扫描兜底；
+  任何一步不成立都返回 null（退回解码腿，**绝不误拒**）。
+
+探针只在文件头（AVATAR_BITMAP_HEAD_BYTES = 256 KiB）内工作，不新增解码、不读全文件。
+
+判据（test/verify-scene-live.mjs，喂真字节跑真实现）新增 8 条：
+正例 7 条 —— 盒链读出 4096×2048；多 ispe 时取 ipma 指认的主图（640×480，取列表
+第一个就错）；逐字复刻真实编码器 ipma（4 条关联、含 essential 位 0x83、ispe 排第 1）
+读出 2000×1200；size=1 的 64 位 largesize 之后仍能走到 ispe；端到端 probeImageSize →
+avatarImportLimit 两侧各喂一次（20000×20000 判拒 / 800×600 放行，全程不解码）；
+ftyp 的 size 被写成整个文件时的兜底扫描；负对照 1 条 —— 盒链截断 / 有 meta 无 ispe /
+非 ISOBMFF 随机字节三喂全部 null；变异负对照 1 条 —— 把真实现的 ispe 宽度读成高度
+（hit.start+4 → hit.start+8）后 import 变异体，同一条 4096×2048 判据必须判红。
+
+先红后绿（命令与原始输出见交付回报）：
+- 未修树（419b6fe 实现）+ 本判据 = `SCENE-LIVE CHECKS FAILED — 7 failed, 671 passed`，
+  其中闸的行为判据打 `[null,true,null,true]`（超限 AVIF 被放行）；
+- 变异「掐掉 size===1 支路」= `SCENE-LIVE CHECKS FAILED — 1 failed, 677 passed`；
+- 修后 = `ALL SCENE-LIVE CHECKS PASSED (678)`。
+
+lib/client.js 由 node scripts/build-client.mjs 重建。
+---
+ src/avatar-import.js       | 177 ++++++++++++++++++++++++++++++++++++-
+ test/verify-scene-live.mjs | 172 +++++++++++++++++++++++++++++++++++
+ 2 files changed, 346 insertions(+), 3 deletions(-)
+
+diff --git a/src/avatar-import.js b/src/avatar-import.js
+index 44dc898..11f4023 100644
+--- a/src/avatar-import.js
++++ b/src/avatar-import.js
+@@ -10,7 +10,8 @@
+  * ══ 为什么闸必须在"解码之前"════════════════════════════════════════════════════
+  * `decodeImageFile` 一跑就已经吃掉了 `w × h × 4` 字节。一个 20000×20000 的 PNG 只有几百 KB，
+  * 解码却要 1.6 GB —— 那是能把标签页直接拖死的量级；而"这图多大"**根本不用解码**：PNG / JPEG /
+- * GIF / BMP / WebP 的头部都写着宽高。下面这组解析器只读**文件头的前若干字节**，
++ * GIF / BMP / WebP 的头部都写着宽高，AVIF 写在 `ftyp` 之后的盒树里（`meta → iprp → ipco →
++ * ispe`，见下面那组 `iso*` 函数）。下面这组解析器只读**文件头的前若干字节**，
+  * 一次 `createImageBitmap` 都不调。
+  *
+  * 契约：
+@@ -66,12 +67,178 @@ function readU32BE(b, at) {
+ function readU32LE(b, at) {
+   return (b[at] | (b[at + 1] << 8) | (b[at + 2] << 16) | (b[at + 3] << 24)) >>> 0;
+ }
++/**
++ * ── AVIF / ISOBMFF（issue #185 的 P1 收口）─────────────────────────────────────
++ * `IMAGE_RASTER_ACCEPT` 里列着 `image/avif`，但探针**原先一个分支都没写**：AVIF 的宽高不在
++ * 文件开头，而在 `ftyp` 之后的盒树 `meta → iprp → ipco → ispe` 里 ⇒ 旧实现恒返 null，
++ * `avatarImportLimit` 只剩体积闸 —— 一个 3 MiB 的 20000×20000 AVIF 能直接过闸，直到
++ * `createImageBitmap` 才炸出约 1.6 GB 的像素内存。"先拒再解"的全部价值在这条格式上归零。
++ *
++ * ISOBMFF 是**盒树**：每个盒 = `size`(4, 大端) + `type`(4) + 有效载荷。按真实结构走要处理：
++ *   · `size === 1` ⇒ 盒头多 8 字节的 64 位 largesize（带大偏移的编码器会写）；
++ *   · `size === 0` ⇒ 该盒一直延伸到文件尾；
++ *   · `meta` 是 **FullBox** ⇒ 有效载荷前 4 字节是 version/flags，子盒从 +4 起；
++ *   · `ipco` 是**属性表**（1 基索引），`ispe` 只是其中一种属性 ⇒ 不能"见到 ispe 就读"；
++ *   · 尺寸属于**主图**：`pitm` 给主 item_ID，`ipma` 给该 item 关联的属性索引
++ *     ⇒ 第 N 个 `ipco` 子盒（且它确是 ispe）才是主图尺寸。
++ * 认不出照样返回 null —— 宁可漏放一个，不可误拒。
++ */
++
++/** 读一个 ISOBMFF 盒头：`{ type, start, end }`（`start` = 有效载荷起点），非法给 null。 */
++function isoBoxAt(b, at, limit) {
++  if (at + 8 > limit) return null;
++  let size = readU32BE(b, at);
++  const type = String.fromCharCode(b[at + 4], b[at + 5], b[at + 6], b[at + 7]);
++  let head = 8;
++  if (size === 1) {
++    if (at + 16 > limit) return null;
++    // 64 位 largesize：高 32 位现实中恒为 0，但仍按无符号拼全（翻成负数就会算出负长度）。
++    size = readU32BE(b, at + 8) * 0x100000000 + readU32BE(b, at + 12);
++    head = 16;
++  } else if (size === 0) {
++    size = limit - at; // 延伸到文件尾
++  }
++  if (size < head) return null; // 盒头自相矛盾 ⇒ 链断在这里
++  const end = Math.min(at + size, limit);
++  if (end <= at) return null;
++  return { type: type, start: at + head, end: end };
++}
++/** 列出一个区间里的**同级**盒（只读盒头；链一断就停）。 */
++function isoChildren(b, from, to) {
++  const out = [];
++  let at = from;
++  while (at + 8 <= to && out.length < 4096) {
++    const child = isoBoxAt(b, at, to);
++    if (!child || child.end <= at) break;
++    out.push(child);
++    at = child.end;
++  }
++  return out;
++}
++/** 同级里第一个指定类型的盒（没有给 null）。 */
++function isoFind(b, type, from, to) {
++  const kids = isoChildren(b, from, to);
++  for (let i = 0; i < kids.length; i++) {
++    if (kids[i].type === type) return kids[i];
++  }
++  return null;
++}
++/**
++ * 在 `ipma` 里找某个 item 关联的**第一个属性索引**（1 基；找不到给 0）。
++ * 布局：FullBox(4) + entry_count(4) + N × [ item_ID(2|4) + association_count(1) + M × 索引 ]；
++ * 索引宽度由 flags 最低位决定（置位 ⇒ 每项 2 字节，最高位是 essential 标志）。
++ */
++function ipmaProperty(b, box, itemId) {
++  const ver = b[box.start];
++  const flags = (b[box.start + 1] << 16) | (b[box.start + 2] << 8) | b[box.start + 3];
++  let at = box.start + 4;
++  if (at + 4 > box.end) return 0;
++  const count = readU32BE(b, at);
++  at += 4;
++  for (let i = 0; i < count; i++) {
++    if (at >= box.end) return 0;
++    let id;
++    if (ver === 0) {
++      if (at + 2 > box.end) return 0;
++      id = (b[at] << 8) | b[at + 1];
++      at += 2;
++    } else {
++      if (at + 4 > box.end) return 0;
++      id = readU32BE(b, at);
++      at += 4;
++    }
++    if (at >= box.end) return 0;
++    const n = b[at];
++    at += 1;
++    const wide = (flags & 1) !== 0;
++    const step = wide ? 2 : 1;
++    for (let k = 0; k < n; k++) {
++      if (at + step > box.end) return 0;
++      const idx = wide ? (((b[at] << 8) | b[at + 1]) & 0x7fff) : (b[at] & 0x7f);
++      at += step;
++      if (id === itemId && idx > 0) return idx;
++    }
++  }
++  return 0;
++}
++/** 品牌 ⇒ `kind`（`avif` / `avis` 是 AVIF，同族其余按 HEIF 记）。 */
++function avifKind(brand) {
++  return brand === "avif" || brand === "avis" ? "avif" : "heif";
++}
++/** 一个 `meta` 盒里的主图尺寸（`{ width, height }`；这个盒里读不出来给 null）。 */
++function avifSizeInMeta(b, meta) {
++  const metaStart = meta.start + 4; // meta 是 FullBox
++  const iprp = isoFind(b, "iprp", metaStart, meta.end);
++  if (!iprp) return null;
++  const ipco = isoFind(b, "ipco", iprp.start, iprp.end);
++  if (!ipco) return null;
++  const props = isoChildren(b, ipco.start, ipco.end);
++  if (!props.length) return null;
++  // 主图：`pitm` 的主 item_ID + `ipma` 的属性索引；指认不出来才退回第一个 ispe。
++  let hit = null;
++  const pitm = isoFind(b, "pitm", metaStart, meta.end);
++  const ipma = isoFind(b, "ipma", iprp.start, iprp.end);
++  if (pitm && ipma && pitm.start + 4 + (b[pitm.start] === 0 ? 2 : 4) <= pitm.end) {
++    const itemId = b[pitm.start] === 0
++      ? ((b[pitm.start + 4] << 8) | b[pitm.start + 5])
++      : readU32BE(b, pitm.start + 4);
++    const idx = ipmaProperty(b, ipma, itemId);
++    if (idx > 0 && idx <= props.length && props[idx - 1].type === "ispe") hit = props[idx - 1];
++  }
++  if (!hit) {
++    for (let i = 0; i < props.length; i++) {
++      if (props[i].type === "ispe") { hit = props[i]; break; }
++    }
++  }
++  if (!hit || hit.end - hit.start < 12) return null;
++  const width = readU32BE(b, hit.start + 4);
++  const height = readU32BE(b, hit.start + 8);
++  if (!width || !height) return null;
++  return { width: width, height: height };
++}
++/**
++ * 从 AVIF / HEIF 的盒树里读出主图尺寸（认不出给 null）。
++ *
++ * 先按盒链走（`ftyp` 之后的顶层盒里找 `meta`）；走不到时再在**已读到的头部字节**里兜底扫
++ * `meta` 盒头 —— 极少数编码器把 `ftyp` 的 size 写成整个文件、或把 `meta` 排在 `mdat` 之后，
++ * 按链就够不着它。兜底不是"见到字就读"：每个候选盒都必须真的走出 `iprp → ipco → ispe`，
++ * 走不通就继续找下一个；全都不行才给 null ⇒ 退回解码腿，绝不误拒。
++ */
++function parseAvifSize(b) {
++  const ftyp = isoBoxAt(b, 0, b.length);
++  if (!ftyp || ftyp.type !== "ftyp") return null;
++  // 主品牌（+ 兼容品牌）必须是这一族，否则不拿任意 ISOBMFF 当图片探。
++  // ftyp 有效载荷 = major_brand(4) + minor_version(4) + compatible_brands…，从 start 起逐个品牌。
++  let brand = "";
++  for (let at = ftyp.start; at + 4 <= ftyp.end; at += 4) {
++    const one = String.fromCharCode(b[at], b[at + 1], b[at + 2], b[at + 3]);
++    if (one === "avif" || one === "avis" || one === "heic" || one === "heif"
++      || one === "mif1" || one === "msf1") { brand = one; break; }
++  }
++  if (!brand) return null;
++  const chained = isoFind(b, "meta", ftyp.end, b.length);
++  if (chained) {
++    const got = avifSizeInMeta(b, chained);
++    if (got) return { width: got.width, height: got.height, kind: avifKind(brand) };
++  }
++  for (let at = ftyp.start; at + 8 <= b.length; at++) {
++    if (b[at + 4] !== 0x6d || b[at + 5] !== 0x65 || b[at + 6] !== 0x74 || b[at + 7] !== 0x61) continue;
++    const cand = isoBoxAt(b, at, b.length);
++    if (!cand || cand.type !== "meta" || cand.end - cand.start < 4) continue;
++    if (chained && cand.start === chained.start) continue;
++    const got = avifSizeInMeta(b, cand);
++    if (got) return { width: got.width, height: got.height, kind: avifKind(brand) };
++  }
++  return null;
++}
+ /**
+  * 从**位图**文件头里读出 `{ width, height, kind }`（认不出给 null）。
+  *
+  * 覆盖 PNG（IHDR）/ GIF（逻辑屏幕）/ BMP（DIB 头，含高度为负的自顶向下位图）/
+- * WebP（VP8 / VP8L / VP8X 三种容器）/ JPEG（逐个扫 SOFn 段）。这些都是**首部即尺寸**的
+- * 格式，所以只需前若干字节；JPEG 的 SOF 段可能被 EXIF 推后，故调用方给到 256 KB。
++ * WebP（VP8 / VP8L / VP8X 三种容器）/ JPEG（逐个扫 SOFn 段）/ AVIF·HEIF（盒树，
++ * 见 `parseAvifSize`）。前几种都是**首部即尺寸**的格式，所以只需前若干字节；
++ * JPEG 的 SOF 段可能被 EXIF 推后、AVIF 的 `meta` 可能排在 `mdat` 之后，
++ * 故调用方给到 256 KB。
+  */
+ function parseBitmapHeaderSize(buffer) {
+   if (!buffer) return null;
+@@ -139,6 +306,10 @@ function parseBitmapHeaderSize(buffer) {
+       at += 2 + len;
+     }
+   }
++  // AVIF / HEIF：`ftyp` 盒（offset 4 的 4cc）⇒ 尺寸在盒树里，单独走 parseAvifSize。
++  if (b[4] === 0x66 && b[5] === 0x74 && b[6] === 0x79 && b[7] === 0x70) {
++    return parseAvifSize(b);
++  }
+   return null;
+ }
+ /**
+diff --git a/test/verify-scene-live.mjs b/test/verify-scene-live.mjs
+index 757dfac..4822310 100644
+--- a/test/verify-scene-live.mjs
++++ b/test/verify-scene-live.mjs
+@@ -3968,6 +3968,178 @@ check('官方侧栏接入用能力门 + 可选服务（不写进 inject，低版
+     check('negative control: 字节序/位域读错会被同一条断言判出（判据不是恒真）',
+       png.width === 1024 && wrongEndian.width !== 1024,
+       '正确=' + png.width + ' 错读=' + wrongEndian.width);
++    // ── AVIF（ISOBMFF）：`ftyp` → `meta` → `iprp` → `ipco` → `ispe` ─────────────────────
++    // 这条格式就在 `IMAGE_RASTER_ACCEPT` 里，但 PR #202 的探针**一个分支都没写**：AVIF 的
++    // 宽高不在文件开头，而在盒树里 ⇒ 旧实现恒返 null、`avatarImportLimit` 只剩体积闸，
++    // 边长闸对它形同虚设（3 MiB 的 20000×20000 AVIF 直接过闸，直到 `createImageBitmap`
++    // 才炸出 1.6 GB 像素内存 —— 而"先拒再解"的全部价值就在这条格式上归零）。
++    // 下面按**真实结构**造最小盒链喂真实现，顺带覆盖三处真实坑：`size === 1` 的 64 位
++    // largesize 盒头、`ispe` 不是 `ipco` 的首个属性、以及"多个 `ispe` 要取**主图**"
++    //（`pitm` 给主 item_ID + `ipma` 给属性索引 ⇒ 指认出来的那个，而不是列表第一个）。
++    const ascii = (s) => {
++      const out = new Uint8Array(s.length);
++      for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i);
++      return out;
++    };
++    const catBytes = (...arrs) => {
++      const out = new Uint8Array(arrs.reduce((n, a) => n + a.length, 0));
++      let at = 0;
++      for (const a of arrs) { out.set(a, at); at += a.length; }
++      return out;
++    };
++    const u32be = (v) => new Uint8Array([(v >>> 24) & 255, (v >>> 16) & 255, (v >>> 8) & 255, v & 255]);
++    const u16be = (v) => new Uint8Array([(v >>> 8) & 255, v & 255]);
++    /** 拼一个 ISOBMFF 盒；`large` 走 `size = 1` + 64 位 largesize 那套盒头。 */
++    const isobox = (type, payload, large) => {
++      const p = payload || new Uint8Array(0);
++      const head = large ? 16 : 8;
++      const out = new Uint8Array(head + p.length);
++      const total = out.length;
++      if (large) {
++        out[3] = 1; // size=1 ⇒ 盒头后跟 64 位 largesize（高 32 位为 0，低位在 [12..15]）
++        out[12] = (total >>> 24) & 255; out[13] = (total >>> 16) & 255;
++        out[14] = (total >>> 8) & 255; out[15] = total & 255;
++      } else {
++        out[0] = (total >>> 24) & 255; out[1] = (total >>> 16) & 255;
++        out[2] = (total >>> 8) & 255; out[3] = total & 255;
++      }
++      for (let i = 0; i < 4; i++) out[4 + i] = type.charCodeAt(i);
++      out.set(p, head);
++      return out;
++    };
++    /** FullBox 的 version(1) + flags(3)（这里只需要全零那一种）。 */
++    const fullBox = (payload) => catBytes(new Uint8Array(4), payload || new Uint8Array(0));
++    const ispeBox = (w, h) => isobox('ispe', fullBox(catBytes(u32be(w), u32be(h))));
++    /** 造最小 AVIF 头：`ftyp` + [pre] + `meta`{ `pitm` + `iprp`{ `ipco`{ [pad] + ispe… } + [ipma] } }。 */
++    const avifHead = (o) => {
++      const props = [];
++      if (o.pad) props.push(o.pad);
++      for (const d of o.ispes) props.push(ispeBox(d[0], d[1]));
++      for (const t of (o.tail || [])) props.push(t);
++      let iprpPayload = isobox('ipco', catBytes(...props));
++      if (o.associate) {
++        const n = new Uint8Array(1);
++        n[0] = o.associate.length;
++        iprpPayload = catBytes(iprpPayload, isobox('ipma', fullBox(catBytes(
++          u32be(1), u16be(o.itemId || 1), n,
++          ...o.associate.map((idx) => new Uint8Array([idx & 0x7f])),
++        ))));
++      }
++      return catBytes(
++        isobox('ftyp', catBytes(ascii('avif'), u32be(0), ascii('mif1'), ascii('miaf'))),
++        o.pre || new Uint8Array(0),
++        isobox('meta', catBytes(
++          fullBox(new Uint8Array(0)),
++          isobox('pitm', fullBox(u16be(o.itemId || 1))),
++          isobox('iprp', iprpPayload),
++        )),
++      );
++    };
++    // ① 基本链：`meta` 前多一个 `free` 盒、`ispe` 前多一个 `av1C` 属性 ⇒ 都该照读不误。
++    const avifBasicBytes = avifHead({
++      ispes: [[4096, 2048]],
++      pad: isobox('av1C', new Uint8Array(4)),
++      pre: isobox('free', new Uint8Array(3)),
++    });
++    const avifBasic = ai.parseBitmapHeaderSize(avifBasicBytes.buffer);
++    check('尺寸解析：AVIF 走 ftyp → meta → iprp → ipco → ispe 读出真宽高（4096×2048）',
++      !!avifBasic && avifBasic.width === 4096 && avifBasic.height === 2048 && avifBasic.kind === 'avif',
++      JSON.stringify(avifBasic));
++    // ② 多个 ispe：`ipma` 把主 item 指向第 2 个属性 ⇒ 必须取 640×480（取列表第一个就错）。
++    const avifMulti = ai.parseBitmapHeaderSize(avifHead({
++      ispes: [[4096, 2048], [640, 480]],
++      associate: [2],
++      itemId: 1,
++    }).buffer);
++    check('尺寸解析：AVIF 有多个 ispe 时取**主图**（pitm + ipma 指认的那个，不是列表第一个）',
++      !!avifMulti && avifMulti.width === 640 && avifMulti.height === 480,
++      JSON.stringify(avifMulti));
++    // ②b 逐字复刻**真实编码器**产物的 `ipma`：4 条关联、第 3 条带 essential 位（0x83）、
++    //     ispe 排第 1、后面跟着 pixi/av1C/colr 三个非 ispe 属性。
++    //     （ffmpeg + libsvtav1 出的 AVIF 实测就是 `pitm itemID=1` + `ipma ver=0 flags=0 [1,2,131,4]`。）
++    const avifRealShape = ai.parseBitmapHeaderSize(avifHead({
++      ispes: [[2000, 1200]],
++      tail: [
++        isobox('pixi', new Uint8Array(4)),
++        isobox('av1C', new Uint8Array(4)),
++        isobox('colr', new Uint8Array(11)),
++      ],
++      associate: [1, 2, 131, 4],
++      itemId: 1,
++    }).buffer);
++    check('尺寸解析：AVIF 复刻真实编码器 ipma（4 条关联 + essential 位置位 + ispe 排第 1）读出 2000×1200',
++      !!avifRealShape && avifRealShape.width === 2000 && avifRealShape.height === 1200,
++      JSON.stringify(avifRealShape));
++    // ③ 64 位 largesize：这个盒头按"8 字节头"读会把 size 读成 1 ⇒ 直接判非法停住，读不到 ispe。
++    const avifLarge = ai.parseBitmapHeaderSize(avifHead({
++      ispes: [[3000, 2000]],
++      pad: isobox('av1C', new Uint8Array(6), true),
++    }).buffer);
++    check('尺寸解析：AVIF 盒头 size=1 的 64 位 largesize 之后仍能走到 ispe（3000×2000）',
++      !!avifLarge && avifLarge.width === 3000 && avifLarge.height === 2000,
++      JSON.stringify(avifLarge));
++    // ④ 端到端：`probeImageSize`（只读头、不解码）→ `avatarImportLimit` 的**行为**两侧各喂一次。
++    const avifBigBytes = avifHead({ ispes: [[20000, 20000]] });
++    const avifOkBytes = avifHead({ ispes: [[800, 600]] });
++    const fakeAvif = (bytes) => ({
++      type: 'image/avif',
++      size: bytes.length,
++      slice: (from, to) => ({ arrayBuffer: async () => bytes.slice(from, to).buffer }),
++    });
++    const probedBig = await ai.probeImageSize(fakeAvif(avifBigBytes));
++    const probedOk = await ai.probeImageSize(fakeAvif(avifOkBytes));
++    const gateBig = ai.avatarImportLimit(fakeAvif(avifBigBytes), probedBig);
++    const gateOk = ai.avatarImportLimit(fakeAvif(avifOkBytes), probedOk);
++    check('AVIF 两道闸：探针读到的 20000×20000 判拒、800×600 放行（全程不解码）',
++      !!probedBig && probedBig.width === 20000 && probedBig.height === 20000
++      && gateBig.ok === false && gateBig.overEdge === true && gateBig.overBytes === false
++      && !!probedOk && probedOk.width === 800 && gateOk.ok === true,
++      JSON.stringify([probedBig, gateBig.ok, probedOk, gateOk.ok]));
++    // ⑥ 兜底扫描：有的编码器把 `ftyp` 的 size 写成整个文件 ⇒ 按盒链就走不到 `meta`。
++    const avifWide = avifHead({ ispes: [[1234, 567]] });
++    const wideLen = avifWide.length;
++    avifWide[0] = (wideLen >>> 24) & 255;
++    avifWide[1] = (wideLen >>> 16) & 255;
++    avifWide[2] = (wideLen >>> 8) & 255;
++    avifWide[3] = wideLen & 255;
++    const avifScanned = ai.parseBitmapHeaderSize(avifWide.buffer);
++    check('尺寸解析：AVIF 的 ftyp 把 size 写成整个文件（盒链够不到 meta）时兜底扫出尺寸（1234×567）',
++      !!avifScanned && avifScanned.width === 1234 && avifScanned.height === 567,
++      JSON.stringify(avifScanned));
++    // ⑤ 负对照：认不出**必须给 null**（退回解码腿），不许从「漏拒」变成「乱拒」。
++    //    三喂：盒链被截断（meta 之后就没了）/ 有 meta 但没有 ispe / 根本不是 ISOBMFF 的随机字节。
++    const cutBytes = avifHead({ ispes: [[800, 600]] });
++    const avifCut = ai.parseBitmapHeaderSize(cutBytes.slice(0, 40).buffer);
++    const avifNoIspe = ai.parseBitmapHeaderSize(
++      isobox('ftyp', catBytes(ascii('avif'), u32be(0))).buffer);
++    const avifNoIspe2 = ai.parseBitmapHeaderSize(avifHead({ ispes: [], pad: null }).buffer);
++    let seed = 0x9e3779b9;
++    const junk = new Uint8Array(512);
++    for (let i = 0; i < junk.length; i++) { seed = (seed * 1103515245 + 12345) >>> 0; junk[i] = seed >>> 24; }
++    const avifJunk = ai.parseBitmapHeaderSize(junk.buffer);
++    check('negative control: AVIF 盒链截断 / 有 meta 无 ispe / 非 ISOBMFF 随机字节 ⇒ 全给 null（不误拒）',
++      avifCut === null && avifNoIspe === null && avifNoIspe2 === null && avifJunk === null,
++      'truncated=' + JSON.stringify(avifCut) + ' noIspe=' + JSON.stringify(avifNoIspe)
++        + ' metaNoIspe=' + JSON.stringify(avifNoIspe2) + ' junk=' + JSON.stringify(avifJunk));
++    // ⑦ **变异负对照**（判据有牙的证据，不是恒真式）：把真实现的 `ispe` 宽度读成高度
++    //    （`hit.start + 4` → `hit.start + 8`），把变异体 import 一次 —— ① 那条
++    //    「4096×2048」的判据必须在这个变异体上判红。改坏了还不红，说明判据是形状死钉。
++    const aiText = readFileSync(join(root, 'src', 'avatar-import.js'), 'utf8');
++    const mutatedText = aiText.replace(
++      '  const width = readU32BE(b, hit.start + 4);',
++      '  const width = readU32BE(b, hit.start + 8);');
++    const mutDir = join(root, '.test-cache', 'avif-mutant');
++    mkdirSync(mutDir, { recursive: true });
++    const mutFile = join(mutDir, 'avatar-import-mutated.mjs');
++    writeFileSync(mutFile, mutatedText);
++    const mutatedMod = await import(pathToFileURL(mutFile).href);
++    const dimOk = (r) => !!r && r.width === 4096 && r.height === 2048 && r.kind === 'avif';
++    const mutatedDim = mutatedMod.parseBitmapHeaderSize(avifBasicBytes.buffer);
++    check('变异负对照: 把 ispe 宽度读成高度 ⇒ 同一条 4096×2048 判据必须判红（改坏了还不红就是死钉）',
++      mutatedText !== aiText && dimOk(avifBasic) === true && dimOk(mutatedDim) === false,
++      'replaced=' + (mutatedText !== aiText) + ' real=' + JSON.stringify(avifBasic)
++        + ' mutated=' + JSON.stringify(mutatedDim));
++    rmSync(mutDir, { recursive: true, force: true });
+   }
+   {
+     // ── 头像导入的两道闸 + 「自动压缩后导入」（#185 后续，用户口径 2026-10-13）──────────
+-- 
+2.54.0 (Apple Git-157)
+
