@@ -2,7 +2,8 @@
 
 - 仓库：`elysia395/dsh-wallpaper-engine`
 - **已回灌（2026-10-13）**：代码分支 `integration/pr-batch`（PR [#207](https://github.com/elysia395/dsh-wallpaper-engine/pull/207)）与本文件所在的 `integration/handoff-docs` 分支均已 push；7 个 PR 各发一条评论；issue [#208](https://github.com/elysia395/dsh-wallpaper-engine/issues/208) / [#209](https://github.com/elysia395/dsh-wallpaper-engine/issues/209) 已开。**`main` 已合并（2026-10-13 23:48 +08:00）**：PR [#207](https://github.com/elysia395/dsh-wallpaper-engine/pull/207) → merge commit `9acdf01`，合并后 main push CI 双平台绿、本地 `run-guards all` 70 步 EXIT=0。
-- 所有实测数字来自 `PR-BATCH-INTEGRATION-REPORT.md`（同仓库，169 行），并已在本地整合线复核。
+- 所有实测数字来自 `PR-BATCH-INTEGRATION-REPORT.md`（同仓库，239 行），并已在本地整合线复核。
+- **收口（2026-10-14 00:1x +08:00）**：#210 的 flaky 已由 PR [#211](https://github.com/elysia395/dsh-wallpaper-engine/pull/211)（`51f3b32`）修掉并 merge 进 `main`（merge commit `8244035`；main push CI run `38428381243` 双平台绿，`origin/main` 复跑 `all` 70 步 EXIT=0），issue [#210](https://github.com/elysia395/dsh-wallpaper-engine/issues/210) 已关；#202 / #203 / #204 / #206 已各发一条「内容已随 #207 进 `main`」的说明评论后关闭（#196 / #199 / #201 被 GitHub 自动标 MERGED）⇒ **仓库 0 个 open PR**。本文件与 `patches/` 继续留档，供作者往各自分支回灌。
 - 复核分支：`integration/pr-batch` @ `623fe1f`（基于 `877952e` 的**拆分后模块布局**，即 `src/styles.js` 已只剩 31 行组装点的那条线）。
 
 ---
