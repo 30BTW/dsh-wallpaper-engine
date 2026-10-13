@@ -204,7 +204,7 @@ cda8149 fix(avatar): AVIF 尺寸探针（ISOBMFF/iprp/ipco/ispe）补全 —— 
 
 三处修完后 CI 转绿：**PR 事件 run `38423298899` 的 ubuntu-latest 与 windows-latest 全部 success**，PR #207 状态 `MERGEABLE` / `CLEAN`。本地整链复跑仍 `node test/run-guards.mjs all` 70 步 EXIT=0。
 
-**已知 flaky（当时未修，建议单独跟一条）**：同一 commit 的 **push 事件** run（`38423291533`）在 windows-latest `[2/57]` `test/verify-client.mjs` 的 `A3-F2` 判红一次 —— `窗口内重复 focusout 不立刻补交、每次跳过都记账，实测 {"handbacks":1,"skipped":4}`（期望 `skipped === 3`）；同 sha 的 PR 事件 run 同一步通过 ⇒ 与 runner 负载相关的时序抖动（该判据与 `src/focus-handback.js` 的实现都用真实时钟：手势窗口 1000 ms / `MIN_GAP_MS` 300 ms / 补交 `setTimeout`）。它落在硬档且是 `verify` 链第 2 步，会随机卡住合并门。建议把 A3-F2 的计量改成不依赖真实时窗（注入时钟，或等在途补交定时器落定后再计量）。
+**已知 flaky（未修，已开 [#210](https://github.com/elysia395/dsh-wallpaper-engine/issues/210) 跟踪）**：同一 commit 的 **push 事件** run（`38423291533`）在 windows-latest `[2/57]` `test/verify-client.mjs` 的 `A3-F2` 判红一次 —— `窗口内重复 focusout 不立刻补交、每次跳过都记账，实测 {"handbacks":1,"skipped":4}`（期望 `skipped === 3`）；同 sha 的 PR 事件 run 同一步通过 ⇒ 与 runner 负载相关的时序抖动（该判据与 `src/focus-handback.js` 的实现都用真实时钟：手势窗口 1000 ms / `MIN_GAP_MS` 300 ms / 补交 `setTimeout`）。它落在硬档且是 `verify` 链第 2 步，会随机卡住合并门。处置：已开 issue [#210](https://github.com/elysia395/dsh-wallpaper-engine/issues/210) —— 建议给 `test/verify-client.mjs:4618-4645` 的 `buildFh` 台架注入虚拟时钟（`Date`/`setTimeout`/`clearTimeout` 目前是从 globalThis 漏进 Proxy 的），把 A3-F2 与 A3-F1/F5 的 `sleep(320/1150)` 换成 `advance(ms)`，并把负对照扩成三条（到点必须补交 / 未到点不许补交 / 拆掉 `retryTimer` 后不许补交）。
 
 ---
 

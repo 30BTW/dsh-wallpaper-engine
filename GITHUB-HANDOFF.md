@@ -28,7 +28,7 @@
 2. ubuntu-latest `[51/57]` `test/verify-steam-discovery.mjs` D3：夹具用 `D:\SteamLibrary`，被 linux 的 `wslPath()` 翻译掩盖 ⇒ 换 UNC 夹具；
 3. windows-latest `[56/57]` `test/verify-asset-paths.mjs` E1：期望值硬写 posix 字面量 ⇒ 改由 `normalize()` 求。
 三处修完 + 并入 `origin/main`（`610ccd8` README 重写，冲突只 `README.md` 一处，已按新版结构重写 #204 那行）后，**ubuntu-latest 与 windows-latest 全绿**，PR 状态 `MERGEABLE` / `CLEAN`。明细见 `PR-BATCH-INTEGRATION-REPORT.md` §4.6。
-另有一处**已知 flaky**：同 commit 的 push 事件 run 在 windows-latest `[2/57]` `test/verify-client.mjs` 的 `A3-F2` 判红过一次（`skipped` 实测 4、期望 3），同 sha 的 PR 事件 run 通过 ⇒ 与 runner 负载相关的时序抖动（判据与 `src/focus-handback.js` 都用真实时钟）。它落在硬档，会随机卡住合并门，建议单独开 issue 把该计量改成注入时钟。
+另有一处**已知 flaky**：同 commit 的 push 事件 run 在 windows-latest `[2/57]` `test/verify-client.mjs` 的 `A3-F2` 判红过一次（`skipped` 实测 4、期望 3），同 sha 的 PR 事件 run 通过 ⇒ 与 runner 负载相关的时序抖动（判据与 `src/focus-handback.js` 都用真实时钟）。它落在硬档，会随机卡住合并门 —— 已开 issue [#210](https://github.com/elysia395/dsh-wallpaper-engine/issues/210) 跟踪（建议给 `buildFh` 台架注入虚拟时钟，把 `A3-F2` 的计量改成 `advance(ms)` 驱动）。
 
 ---
 
