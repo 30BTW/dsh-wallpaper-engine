@@ -6,7 +6,7 @@
 - 本轮范围：GitHub 上全部 **7 个 open PR**（#196 / #199 / #201 / #202 / #203 / #204 / #206）
 - 结论：**6 个已本地合并（移植）进整合分支并全链验收；#196 已是本地线祖先，本地无需动作、只需决定何时合入 main**。评审发现并已在本线修掉 **4 条 P1**（#202 AVIF 尺寸探针、#203 对比度红线、#204 选择器截断、#199 判据缺牙 + 404 文案因果），修复批次另跑一轮全链验收。
 - 交付物：本报告、`GITHUB-HANDOFF.md`（回灌文稿：7 条 PR 评论 + 2 条 issue + 命令备忘）、`patches/`（8 个可直接 `git apply` 的补丁）、以及仓库既有的 `ENGINEERING-REPORT.md`
-- **已回灌（2026-10-13）**：`integration/pr-batch`（PR [#207](https://github.com/elysia395/dsh-wallpaper-engine/pull/207)）与 `integration/handoff-docs`（本报告 + 补丁）已 push；7 个 PR 各发一条评论；issue [#208](https://github.com/elysia395/dsh-wallpaper-engine/issues/208) / [#209](https://github.com/elysia395/dsh-wallpaper-engine/issues/209) 已开；**`main` 未合并**（留给评审）
+- **已回灌（2026-10-13）**：`integration/pr-batch`（PR [#207](https://github.com/elysia395/dsh-wallpaper-engine/pull/207)）与 `integration/handoff-docs`（本报告 + 补丁）已 push；7 个 PR 各发一条评论；issue [#208](https://github.com/elysia395/dsh-wallpaper-engine/issues/208) / [#209](https://github.com/elysia395/dsh-wallpaper-engine/issues/209) 已开；**`main` 已合并（2026-10-13）**：PR [#207](https://github.com/elysia395/dsh-wallpaper-engine/pull/207) 已 merge 进 `main`，merge commit `9acdf0101e596ab8525d9dd8817ad0af978fbf00`（`mergedAt 2026-10-13T15:48:55Z` = 北京时间 23:48）。合并后证据：main push CI run `38425270513` **ubuntu-latest + windows-latest 全绿**；在 `origin/main` 的工作树里复跑 `node test/run-guards.mjs all` = **70 步 EXIT=0**（0 条 ✗、无软档降级）、`node test/verify-static.mjs` = `ALL STATIC GATE CHECKS PASSED`。
 
 ---
 
@@ -212,7 +212,7 @@ cda8149 fix(avatar): AVIF 尺寸探针（ISOBMFF/iprp/ipco/ispe）补全 —— 
 
 ### 5.1 已回灌（分支 / PR / 评论 / issue 均已发出）
 
-整合分支 `integration/pr-batch` @ `9c14480` 已 push，并在 PR [#207](https://github.com/elysia395/dsh-wallpaper-engine/pull/207) 上向 `main` 发起整合（CI 双平台已转绿，见 4.6）；本报告与补丁在 `integration/handoff-docs` 分支；7 个 PR（#196 / #199 / #201 / #202 / #203 / #204 / #206）各收到一条评审评论；[issue #208](https://github.com/elysia395/dsh-wallpaper-engine/issues/208)（GPU 抓帧缓存名逼近 NAME_MAX）与 [issue #209](https://github.com/elysia395/dsh-wallpaper-engine/issues/209)（模块拆分带来的移植负担）已开。**`main` 未合并**：`origin/main` 无分支保护、也没有任何 PR 有 review 记录，合并应由维护者评审 [PR #207](https://github.com/elysia395/dsh-wallpaper-engine/pull/207) 后决定；`#196` 仍可单独 fast-forward。
+整合分支 `integration/pr-batch` @ `9c14480` 已 push，并在 PR [#207](https://github.com/elysia395/dsh-wallpaper-engine/pull/207) 上向 `main` 发起整合（CI 双平台已转绿，见 4.6）；本报告与补丁在 `integration/handoff-docs` 分支；7 个 PR（#196 / #199 / #201 / #202 / #203 / #204 / #206）各收到一条评审评论；[issue #208](https://github.com/elysia395/dsh-wallpaper-engine/issues/208)（GPU 抓帧缓存名逼近 NAME_MAX）与 [issue #209](https://github.com/elysia395/dsh-wallpaper-engine/issues/209)（模块拆分带来的移植负担）已开。**`main` 已合并**：PR [#207](https://github.com/elysia395/dsh-wallpaper-engine/pull/207) 已 merge（commit `9acdf01`，2026-10-13 23:48 +08:00）；合并后 main 上 `run-guards all` 70 步 EXIT=0、`verify-static` 绿、push CI 双平台绿。`#196` 是本地线祖先，随本次合并一并进入 `main`。
 
 ### 5.2 遗留问题清单
 
@@ -235,5 +235,5 @@ cda8149 fix(avatar): AVIF 尺寸探针（ISOBMFF/iprp/ipco/ispe）补全 —— 
 ### 5.3 下一步（本轮已执行的部分）
 
 1. **本地保留** ✅：`integration/pr-batch` @ `9c14480` 即「6 个 PR + 4 条 P1 修复在本地线跑通」的成品；复验只需在短路径 checkout 里跑 `node test/run-guards.mjs all`（本轮已跑三次，均 EXIT=0）。
-2. **要回灌 GitHub** ⏳（等用户点头；本地材料已备好）：逐 PR 在其自己的分支上 `git apply` `patches/` 里对应的子补丁 → 推分支 → 在 PR 里贴 `GITHUB-HANDOFF.md` 的评论稿（说明改了什么、为什么）→ 再按第 1 节顺序合进 main；#196 可直接 fast-forward。
+2. **回灌 GitHub** ✅（2026-10-13 执行）：分支已 push、[PR #207](https://github.com/elysia395/dsh-wallpaper-engine/pull/207) 已开并**合并进 `main`**（merge commit `9acdf01`）；7 个 PR 各收到评审评论；`patches/` 里与各 PR 对应的子补丁仍待**作者自己**落到各自分支（本仓侧的回灌已闭环）。
 3. **要长期跑这条线** ⏳：把 5.2 的 P2 与两条 issue（`GITHUB-HANDOFF.md` 的 issue-A / issue-B）开成仓库 issue；`ENAMETOOLONG` 建议优先级最高（它会制造与代码无关的假红）。

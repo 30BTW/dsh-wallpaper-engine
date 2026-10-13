@@ -1,7 +1,7 @@
 # GITHUB-HANDOFF — 社区 PR 批量整合回灌文稿
 
 - 仓库：`elysia395/dsh-wallpaper-engine`
-- **已回灌（2026-10-13）**：代码分支 `integration/pr-batch`（PR [#207](https://github.com/elysia395/dsh-wallpaper-engine/pull/207)）与本文件所在的 `integration/handoff-docs` 分支均已 push；7 个 PR 各发一条评论；issue [#208](https://github.com/elysia395/dsh-wallpaper-engine/issues/208) / [#209](https://github.com/elysia395/dsh-wallpaper-engine/issues/209) 已开。**未合并 `main`**（留给评审）。
+- **已回灌（2026-10-13）**：代码分支 `integration/pr-batch`（PR [#207](https://github.com/elysia395/dsh-wallpaper-engine/pull/207)）与本文件所在的 `integration/handoff-docs` 分支均已 push；7 个 PR 各发一条评论；issue [#208](https://github.com/elysia395/dsh-wallpaper-engine/issues/208) / [#209](https://github.com/elysia395/dsh-wallpaper-engine/issues/209) 已开。**`main` 已合并（2026-10-13 23:48 +08:00）**：PR [#207](https://github.com/elysia395/dsh-wallpaper-engine/pull/207) → merge commit `9acdf01`，合并后 main push CI 双平台绿、本地 `run-guards all` 70 步 EXIT=0。
 - 所有实测数字来自 `PR-BATCH-INTEGRATION-REPORT.md`（同仓库，169 行），并已在本地整合线复核。
 - 复核分支：`integration/pr-batch` @ `623fe1f`（基于 `877952e` 的**拆分后模块布局**，即 `src/styles.js` 已只剩 31 行组装点的那条线）。
 
@@ -9,7 +9,7 @@
 
 ## 0. 使用说明
 
-本文件里的文稿已于 2026-10-13 回灌：分支与 PR 已 push / 开，7 条评论已发，2 个 issue 已开；`main` 未合并。
+本文件里的文稿已于 2026-10-13 回灌：分支与 PR 已 push / 开，7 条评论已发，2 个 issue 已开；[PR #207](https://github.com/elysia395/dsh-wallpaper-engine/pull/207) 已**合并进 `main`**（merge commit `9acdf01`，合并后双平台 CI 绿、本地 70 步全绿）。
 
 **给 PR 作者（@jassdingk / @tangdogdaihuman / @Fish-under-sea / @yuxilao / @elysia395 / @oneincase）**
 直接取 `## 1. 每个 PR 一条评论稿` 里属于你的那一节，全文粘到对应 PR 的评论框。里面写清了：本 PR 在本地整合线跑过的判据、值不值得合、以及（如果有）必须修掉的 P1。P1 的定位与实测数字都给了，按它改即可。
