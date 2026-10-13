@@ -22,6 +22,14 @@
 **给 fork 作者**
 你的 fork PR（#201 / #203 / #204）在 GitHub 上**零 workflow run**（`statusCheckRollup` 为空、`mergeStateStatus=UNSTABLE`），所以"CI 绿"这一档在 GitHub 侧没有证据。本地整合线替你补齐了突变/负对照证据，#203 与 #204 另各有一条 P1；不修 P1 时，建议先别请求合 main。
 
+**CI 状态（2026-10-13 晚更新，给所有评审者）**
+整合 PR [#207](https://github.com/elysia395/dsh-wallpaper-engine/pull/207) 第一次跑 CI 时两个平台同时判红，卡点不同 —— 都是**本地重构线自己的守卫平台假设**，不是社区 PR 的问题：
+1. windows-latest `[4/57]` `test/verify-transcode-state.mjs`：负对照按行锚定源码文本，Windows 检出是 CRLF ⇒ 仓库补 `.gitattributes`（`* text=auto eol=lf`）；
+2. ubuntu-latest `[51/57]` `test/verify-steam-discovery.mjs` D3：夹具用 `D:\SteamLibrary`，被 linux 的 `wslPath()` 翻译掩盖 ⇒ 换 UNC 夹具；
+3. windows-latest `[56/57]` `test/verify-asset-paths.mjs` E1：期望值硬写 posix 字面量 ⇒ 改由 `normalize()` 求。
+三处修完 + 并入 `origin/main`（`610ccd8` README 重写，冲突只 `README.md` 一处，已按新版结构重写 #204 那行）后，**ubuntu-latest 与 windows-latest 全绿**，PR 状态 `MERGEABLE` / `CLEAN`。明细见 `PR-BATCH-INTEGRATION-REPORT.md` §4.6。
+另有一处**已知 flaky**：同 commit 的 push 事件 run 在 windows-latest `[2/57]` `test/verify-client.mjs` 的 `A3-F2` 判红过一次（`skipped` 实测 4、期望 3），同 sha 的 PR 事件 run 通过 ⇒ 与 runner 负载相关的时序抖动（判据与 `src/focus-handback.js` 都用真实时钟）。它落在硬档，会随机卡住合并门，建议单独开 issue 把该计量改成注入时钟。
+
 ---
 
 ## 1. 每个 PR 一条评论稿

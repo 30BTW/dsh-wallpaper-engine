@@ -2,7 +2,7 @@
 
 - 时间：2026-10-13（Asia/Shanghai）
 - 仓库：`elysia395/dsh-wallpaper-engine`
-- 整合分支：`integration/pr-batch`，**HEAD `623fe1f`**，基于本地线 `feat/webwallgl-npm-3.0.0` @ `877952e`（领先 `origin/main` 111 笔，落后 0 笔）
+- 整合分支：`integration/pr-batch`，**HEAD `9c14480`**（= `623fe1f` + 三笔 CI 跨平台修复 + 一笔 main 合并，见 4.6），基于本地线 `feat/webwallgl-npm-3.0.0` @ `877952e`（领先 `origin/main` 113 笔，落后 0 笔）
 - 本轮范围：GitHub 上全部 **7 个 open PR**（#196 / #199 / #201 / #202 / #203 / #204 / #206）
 - 结论：**6 个已本地合并（移植）进整合分支并全链验收；#196 已是本地线祖先，本地无需动作、只需决定何时合入 main**。评审发现并已在本线修掉 **4 条 P1**（#202 AVIF 尺寸探针、#203 对比度红线、#204 选择器截断、#199 判据缺牙 + 404 文案因果），修复批次另跑一轮全链验收。
 - 交付物：本报告、`GITHUB-HANDOFF.md`（回灌文稿：7 条 PR 评论 + 2 条 issue + 命令备忘）、`patches/`（8 个可直接 `git apply` 的补丁）、以及仓库既有的 `ENGINEERING-REPORT.md`
@@ -22,7 +22,7 @@
 | [#202](https://github.com/elysia395/dsh-wallpaper-engine/pull/202) | @Fish-under-sea | 头像 SVG 等格式导入 + 两道闸 + 光效合批 + 三档重置（取代 #198） | **值得** | **达标**（**P1 AVIF 边长闸失效 → 已修**） | ✅ `dd25f1c` → `30541ce`（+ `cda8149` `176a90d`） |
 | [#206](https://github.com/elysia395/dsh-wallpaper-engine/pull/206) | @yuxilao | GPU 抓帧缓存改单主帧 + 面积升级制 | **值得** | 达标，但**不能直接 merge** | ✅ `f788a33` |
 
-**最终验收（`623fe1f`）**
+**最终验收（`623fe1f` 本地链 / `9c14480` 加上 CI）**
 
 ```
 ▶ all —— 70 步（硬档 63 / 软档 7）
@@ -30,6 +30,8 @@
 ✓ 提交物与重建结果一致（按提交形态 LF 比较） — 4540090 B
 ALL STATIC GATE CHECKS PASSED                               （npx eslint src test lib → 0 error）
 ```
+
+CI（首次跑通，见 4.6）：PR [#207](https://github.com/elysia395/dsh-wallpaper-engine/pull/207) 的 `verify` 在 **ubuntu-latest + windows-latest 全部 success**（run `38423298899`），PR 状态 `MERGEABLE` / `CLEAN`。
 
 基线 `877952e` 为 **68 步全绿**；`70 − 68 = 2` 正是 #206 新增守卫及其派生步。整链日志：`/tmp/chain-accept.log`（另有两轮：`/tmp/chain-final.log` @`176a90d`、`/tmp/lead-final-all.log` @`419b6fe`）。
 
@@ -188,13 +190,29 @@ cda8149 fix(avatar): AVIF 尺寸探针（ISOBMFF/iprp/ipco/ispe）补全 —— 
   - 仅适用于本地整合线（含本地专属文件）：`203-contrast-ink-grid.patch`、`199-red-green-guard.patch`、`199-p2-404-reason.patch`。
 - `GITHUB-HANDOFF.md`：7 条 PR 评论草稿（逐条给「值得合 / 有条件 / 现状不该合 + 具体修法」）、2 条 issue 草稿（ENAMETOOLONG；本地模块拆分带来的移植负担）、回灌顺序与命令备忘。文中的 4 处自相矛盾（提交数 102 vs 92、#196「祖先」表述、#202 文件数 28 vs 26、`verify-scene` 132 vs 130）已逐一修正。
 
+### 4.6 CI 首次跑绿：三个跨平台问题 + 一个 flaky
+
+这条工程线此前**从未在 GitHub CI 上跑过**（#196 的 4/4 绿灯停在 `227b848`，即巨石拆分重构之前），所以 PR #207 第一次运行（run `38421719079`）是两个平台同时判红、卡点还各不相同 —— 它们都不是社区 PR 的问题，而是本地重构线自己的守卫平台假设：
+
+| 平台 | 卡点 | 根因 | 修法 |
+|---|---|---|---|
+| windows-latest | `[4/57]` `test/verify-transcode-state.mjs` 负对照 | 负对照按行锚定源码文本（`…onEntry(entry);\n`），Windows 检出是 CRLF ⇒ 锚点不命中 ⇒ 变异体没删成 ⇒ 反而判成「这条判据没有牙」。仓库当时没有 `.gitattributes` | 新增 `.gitattributes`（`* text=auto eol=lf` + 二进制钉住），把「检出即 LF」变成仓库契约；该处正则同时容 `\r?\n` 兜底 |
+| ubuntu-latest | `[51/57]` `test/verify-steam-discovery.mjs` D3 | 夹具用 `D:\SteamLibrary`，而 `lib/steam-discovery.js:163-168` 的 `wslPath()` 在 linux 上把 `D:\x` 与未反转义的 `D:\\x` 都翻译成同一个 `/mnt/d/x` ⇒ 正向期望值错，负对照也同时失去牙 | D3 改用不带盘符的 UNC 夹具（`wslPath` 恒等），反转义重新是唯一变量 |
+| windows-latest | `[56/57]` `test/verify-asset-paths.mjs` E1 | 期望值硬写 posix 字面量（`'/cfg/we'`、`endsWith('/')`），Windows 的 `normalize()` 产出 `\cfg\we` / 尾字符 `\` | 期望值改由 `normalize()` 求得，尾分隔符按 `/[\\/]$/` 判定（语义与分隔符无关） |
+
+同一时间 `origin/main` 前进一笔（`610ccd8`：中文 README 整篇重写 + `assets/about/sponsor-fish.png`），冲突只有 `README.md` 一处 —— 本地线在旧表里加的 #204 行在新版结构里没有对应位置。处置：`README.md` 取 main 新版，把 #204 的说明按新版结构写成「液态玻璃、字体与预设」下的一条 bullet（8 条 / 120 字 / 整条丢弃 / 目标需自定位 / 载体在 `::before` / issue #200）；`README.en.md` main 未改动，本地那行自动合并保留。
+
+三处修完后 CI 转绿：**PR 事件 run `38423298899` 的 ubuntu-latest 与 windows-latest 全部 success**，PR #207 状态 `MERGEABLE` / `CLEAN`。本地整链复跑仍 `node test/run-guards.mjs all` 70 步 EXIT=0。
+
+**已知 flaky（当时未修，建议单独跟一条）**：同一 commit 的 **push 事件** run（`38423291533`）在 windows-latest `[2/57]` `test/verify-client.mjs` 的 `A3-F2` 判红一次 —— `窗口内重复 focusout 不立刻补交、每次跳过都记账，实测 {"handbacks":1,"skipped":4}`（期望 `skipped === 3`）；同 sha 的 PR 事件 run 同一步通过 ⇒ 与 runner 负载相关的时序抖动（该判据与 `src/focus-handback.js` 的实现都用真实时钟：手势窗口 1000 ms / `MIN_GAP_MS` 300 ms / 补交 `setTimeout`）。它落在硬档且是 `verify` 链第 2 步，会随机卡住合并门。建议把 A3-F2 的计量改成不依赖真实时窗（注入时钟，或等在途补交定时器落定后再计量）。
+
 ---
 
 ## 5. 未闭合项与建议
 
 ### 5.1 已回灌（分支 / PR / 评论 / issue 均已发出）
 
-整合分支 `integration/pr-batch` @ `623fe1f` 已 push，并在 PR [#207](https://github.com/elysia395/dsh-wallpaper-engine/pull/207) 上向 `main` 发起整合；本报告与补丁在 `integration/handoff-docs` 分支；7 个 PR（#196 / #199 / #201 / #202 / #203 / #204 / #206）各收到一条评审评论；[issue #208](https://github.com/elysia395/dsh-wallpaper-engine/issues/208)（GPU 抓帧缓存名逼近 NAME_MAX）与 [issue #209](https://github.com/elysia395/dsh-wallpaper-engine/issues/209)（模块拆分带来的移植负担）已开。**`main` 未合并**：`origin/main` 无分支保护、也没有任何 PR 有 review 记录，合并应由维护者评审 [PR #207](https://github.com/elysia395/dsh-wallpaper-engine/pull/207) 后决定；`#196` 仍可单独 fast-forward。
+整合分支 `integration/pr-batch` @ `9c14480` 已 push，并在 PR [#207](https://github.com/elysia395/dsh-wallpaper-engine/pull/207) 上向 `main` 发起整合（CI 双平台已转绿，见 4.6）；本报告与补丁在 `integration/handoff-docs` 分支；7 个 PR（#196 / #199 / #201 / #202 / #203 / #204 / #206）各收到一条评审评论；[issue #208](https://github.com/elysia395/dsh-wallpaper-engine/issues/208)（GPU 抓帧缓存名逼近 NAME_MAX）与 [issue #209](https://github.com/elysia395/dsh-wallpaper-engine/issues/209)（模块拆分带来的移植负担）已开。**`main` 未合并**：`origin/main` 无分支保护、也没有任何 PR 有 review 记录，合并应由维护者评审 [PR #207](https://github.com/elysia395/dsh-wallpaper-engine/pull/207) 后决定；`#196` 仍可单独 fast-forward。
 
 ### 5.2 遗留问题清单
 
@@ -216,6 +234,6 @@ cda8149 fix(avatar): AVIF 尺寸探针（ISOBMFF/iprp/ipco/ispe）补全 —— 
 
 ### 5.3 下一步（本轮已执行的部分）
 
-1. **本地保留** ✅：`integration/pr-batch` @ `623fe1f` 即「6 个 PR + 4 条 P1 修复在本地线跑通」的成品；复验只需在短路径 checkout 里跑 `node test/run-guards.mjs all`（本轮已跑三次，均 EXIT=0）。
+1. **本地保留** ✅：`integration/pr-batch` @ `9c14480` 即「6 个 PR + 4 条 P1 修复在本地线跑通」的成品；复验只需在短路径 checkout 里跑 `node test/run-guards.mjs all`（本轮已跑三次，均 EXIT=0）。
 2. **要回灌 GitHub** ⏳（等用户点头；本地材料已备好）：逐 PR 在其自己的分支上 `git apply` `patches/` 里对应的子补丁 → 推分支 → 在 PR 里贴 `GITHUB-HANDOFF.md` 的评论稿（说明改了什么、为什么）→ 再按第 1 节顺序合进 main；#196 可直接 fast-forward。
 3. **要长期跑这条线** ⏳：把 5.2 的 P2 与两条 issue（`GITHUB-HANDOFF.md` 的 issue-A / issue-B）开成仓库 issue；`ENAMETOOLONG` 建议优先级最高（它会制造与代码无关的假红）。
