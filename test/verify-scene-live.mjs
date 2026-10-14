@@ -2533,6 +2533,15 @@ check('「壁纸属性」按钮：仅场景/网页壁纸 + 常规按钮样式（
       && !/^\s*\.we-picker__btn--primary\s*\{/m.test(extStyleSrc),
     'ext 覆盖规则数=' + (extStyleSrc.match(/^\s*\.we-picker__btn--primary\s*\{/m) || []).length
       + ' extStyleSrc.length=' + extStyleSrc.length);
+  // 窄容器不溢出：官方右栏最窄 276px，四枚按钮同行放不下（实测溢出 27px）⇒ 控制行必须
+  // 允许整组折行、按钮组带 margin-left: auto（折行时靠右）。判据钉两个声明在**同一条规则**上。
+  const curRowRule = stylesSrc.match(/\.we-qp__current\s*\{[^}]*\}/);
+  const actsRule = stylesSrc.match(/\.we-qp__current-actions\s*\{[^}]*\}/);
+  check('窄容器防溢出：控制行 flex-wrap + 按钮组 margin-left: auto（折行右对齐）',
+    Boolean(curRowRule) && /flex-wrap:\s*wrap/.test(curRowRule[0])
+      && Boolean(actsRule) && /margin-left:\s*auto/.test(actsRule[0]),
+    'row=' + (curRowRule ? curRowRule[0].replace(/\s+/g, ' ').trim() : 'MISSING')
+      + ' | acts=' + (actsRule ? actsRule[0].replace(/\s+/g, ' ').trim() : 'MISSING'));
 }
 check('属性面板热更新走 __wp.updateWebProps',
   src.includes('function applyUserProps(') && src.includes('wp.updateWebProps(wire)'));
