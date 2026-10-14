@@ -443,6 +443,8 @@ function applySelection(id, opts) {
     selection.type = null;
     selection.previewUrl = null;
     selection.mediaExt = null;
+    selection.slidesUrl = null;
+    selection.slideIntervalMs = null;
     selection.liveFrame = null;
     selection.sceneVideo = null;
     selection.sceneLiveSrc = null;
@@ -474,6 +476,8 @@ function applySelection(id, opts) {
     selection.type = null;
     selection.previewUrl = null;
     selection.mediaExt = null;
+    selection.slidesUrl = null;
+    selection.slideIntervalMs = null;
     selection.liveFrame = null;
     selection.sceneVideo = null;
     selection.sceneLiveSrc = null;
@@ -504,6 +508,11 @@ function applySelection(id, opts) {
   // 真实容器后缀（宿主 inventory 的 mediaExt）：媒体 URL 是 token 形态、没有扩展名，
   // 「浏览器原生可解」那条判据（见 src/video-layer.js 的 isNativelyPlayableSource）必须靠它。
   selection.mediaExt = w.mediaExt || null;
+  // 图片 / 幻灯片壁纸：清单入口与 WE 声明的切换周期，由 host inventory 给。
+  // 只有图片类型带这两个字段；其余类型显式清空，避免上一张的值残留。
+  selection.slidesUrl = w.type === "image" && w.slidesUrl ? w.slidesUrl : null;
+  selection.slideIntervalMs = w.type === "image" && typeof w.slideIntervalMs === "number"
+    ? w.slideIntervalMs : null;
   selection.blockedNote = "";
   // 静态帧 URL (frameUrl, 立即上屏)：供页面刷新 / 档位切换时重挂。
   selection.sceneFrameUrl = w.type === "scene" ? (w.frameUrl || null) : null;
@@ -658,6 +667,9 @@ function buildMedia(sel) {
         if (media.src !== sel.previewUrl) media.src = sel.previewUrl;
       };
     }
+    // 图片 / 幻灯片：首图已作为底层媒体挂上，清单到齐后在**同一层里**叠两张
+    // 过场图轮播（WE 图片项目，见 installImageSlideshow 的不变量）。
+    if (sel.type === "image" && sel.slidesUrl) scheduleImageSlideshow(media, sel);
   } else {
     // web 旧链不走元素级领养（iframe reparent 重载）：轮换的 web 提交是
     // 节点级领养（staging 容器整体转为新层），此处只会是手动选择路径。
@@ -673,6 +685,85 @@ function buildMedia(sel) {
     media.className = "we-media we-iframe";
   }
   return media;
+}
+
+// ── 图片 / 幻灯片轮播（WE 图片项目）───────────────────────────────────────────
+// 底层的首图就是被层领养的那个 `img.we-media`（准备链探测过、走元素级领养）：
+// 轮播只从它**上面**叠两张过场图，绝不改它的 src / 内联 opacity —— 后者会覆盖
+// `.we-layer .we-media` 上的 `--we-wallpaper-opacity`（壁纸透明度设置）。
+//
+// 不变量：
+//   · 清单每个壁纸 id 只拉一次（失败不写缓存，下次切换重试）；
+//   · 层被换掉（底层 `!isConnected`）时 tick 自行停表并摘掉过场图 —— 与
+//     `releaseLayerMedia` 只认 video/iframe 的既有收尾口径一致，不需要新钩子；
+//   · 页面隐藏那拍不推进（恢复可见后继续），不引入新的暂停语义。
+const imageSlidesCache = new Map(); // wallpaper id -> { images: string[], intervalMs: number }
+
+function scheduleImageSlideshow(media, sel) {
+  if (!media || !sel || !sel.slidesUrl) return;
+  const cached = imageSlidesCache.get(String(sel.id || ""));
+  if (cached) { installImageSlideshow(media, cached); return; }
+  if (typeof apiJson !== "function") return;
+  Promise.resolve(apiJson(sel.slidesUrl)).then((r) => {
+    const payload = r && r.ok ? r.data : null;
+    if (!payload || payload.ok !== true || !Array.isArray(payload.images)) return;
+    const images = payload.images
+      .map((it) => (it && typeof it.url === "string" ? it.url : null))
+      .filter((u) => !!u);
+    if (images.length < 2) return;
+    const entry = { images, intervalMs: clampNum(sel.slideIntervalMs, 5000, 3600000, 30000) };
+    imageSlidesCache.set(String(sel.id || ""), entry);
+    // 拉清单期间用户可能已经切走：只有底层还在屏上才装过场层。
+    if (media.isConnected) installImageSlideshow(media, entry);
+  }).catch(() => { /* 清单不可达：退化成单张首图 */ });
+}
+
+function installImageSlideshow(media, entry) {
+  if (typeof document === "undefined" || typeof window === "undefined") return;
+  const parent = media.parentNode;
+  if (!parent) return;
+  const layers = [];
+  for (let k = 0; k < 2; k++) {
+    const img = document.createElement("img");
+    img.className = "we-media we-media--fit we-slide";
+    img.alt = "";
+    img.draggable = false;
+    img.style.opacity = "0";
+    parent.appendChild(img);
+    layers.push(img);
+  }
+  const order = entry.images;
+  let index = 0;
+  let top = 0;
+  let timer = null;
+  const stop = () => {
+    if (timer !== null) { try { window.clearInterval(timer); } catch { /* ignore */ } }
+    timer = null;
+    for (const img of layers) { try { img.remove(); } catch { /* ignore */ } }
+  };
+  timer = window.setInterval(() => {
+    if (!media.isConnected || !parent.isConnected) { stop(); return; }
+    if (document.hidden) return; // 页面隐藏不推进；恢复可见后下一拍继续
+    index = (index + 1) % order.length;
+    const next = 1 - top;
+    const incoming = layers[next];
+    const outgoing = layers[top];
+    incoming.src = order[index];
+    const swap = () => {
+      incoming.style.transition = "opacity 600ms ease";
+      outgoing.style.transition = "opacity 600ms ease";
+      incoming.style.opacity = "1";
+      outgoing.style.opacity = "0";
+      top = next;
+    };
+    if (incoming.complete && incoming.naturalWidth > 0) swap();
+    else {
+      incoming.addEventListener("load", swap, { once: true });
+      incoming.addEventListener("error", swap, { once: true });
+    }
+  }, entry.intervalMs);
+  // 预载第二张：第一拍就能立刻换画（否则那一拍才发现要下载）。
+  layers[1].src = order[1 % order.length];
 }
 
 // ── Occlusion pause (遮挡暂停, WE-style) ────────────────────────────────────
