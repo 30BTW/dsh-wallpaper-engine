@@ -4818,7 +4818,7 @@ function RopeDock() {
 }
 
 // ── One-time "what's new" notice ─────────────────────────────────────────────
-// The notice carries four user-facing stories:
+// The notice carries five user-facing stories:
 //   ① session avatars got a big import upgrade — SVG / GIF / BMP / AVIF now
 //      supported, oversized images get an「auto-compress & import」escape hatch,
 //      and a crop dialog runs before upload (Extensions tab),
@@ -4826,9 +4826,10 @@ function RopeDock() {
 //      each other off; web-wallpaper audio reactivity under the strict sandbox;
 //      inline code in thinking blocks, native dropdown popups and the preset
 //      dialog display correctly again,
-//   ③ a one-tap star button (「点个星喵⭐」) on the sidebar wallpaper card,
-//   ④ Linux X11 occlusion power saving — a covered window drops frames, a fully
-//      covered one pauses (more battery left).
+//   ③ Linux X11 occlusion power saving — a covered window drops frames, a fully
+//      covered one pauses (more battery left),
+//   ④ a bold tip: enabling dark mode + the「作者自用」preset is one of the
+//      plugin's best looks.
 // The notice art (GitHub star plea, shipped as lib/about/update-notice.jpg and
 // served by the /about-qr whitelist route — same family as the contact QRs,
 // NOT inlined: see src/about-assets.js) sits at the top with a caption
@@ -4843,7 +4844,8 @@ function RopeDock() {
 // 的 /about-qr 白名单还没有 update-notice.jpg ⇒ 图 404。若照旧立刻弹窗，用户看到
 // 裂图，而「知道了」一关整版公告永久退场，配图等于永远没人看到。
 // ⚠️ 2026-10-15 公告随新版本换血：v1.3.2 之后的一整批（头像导入大升级 / 修复一批 /
-// 星链按钮 / Linux 遮挡省电）。配图沿用「星来」那张、caption 保留；哨兵升到下一版号 ——
+// Linux 遮挡省电 / 深色模式 + 作者自用提示；求星按钮已按用户口径回退）。配图沿用
+// 「星来」那张、caption 保留；哨兵升到下一版号 ——
 // 看过 1.3.2 公告的机器重弹一次，是设计意图。
 const NOTICE_VERSION = "1.3.3";
 // 公告内容改版（新增「侧边栏只是简略版」大字说明 + 配图缩小）必须升哨兵：
@@ -4939,7 +4941,7 @@ function UpdateNotice() {
   };
   if (!show) return null;
   return React.createElement("div", { className: "we-update-notice", role: "alert" },
-    React.createElement("div", { className: "we-update-notice__title" }, weT("🎉 更新：头像导入大升级 · 一组修复 · 一键点星")),
+    React.createElement("div", { className: "we-update-notice__title" }, weT("🎉 更新：头像导入大升级 · 一组修复 · 省电与外观提示")),
     // 只有 ready 才渲染配图与说明行（timeout 降级态无图弹出，正文信息自足）。
     // 2026-10-12 配图换「星来」，但**求星路径指引保留**（用户口径）：图下那行
     // 「关于页一键直达」是用户找到点星入口的唯一指引，不随配图换血退场。
@@ -4956,11 +4958,10 @@ function UpdateNotice() {
         "② ", noticeEx(2), React.createElement("strong", null, weT("修复一批")),
         weT("：多窗口实时渲染不再互相踢掉；网页壁纸音频可视化恢复跳动；设置图标对齐、思考块行内代码与下拉弹层显示恢复正常。")),
       React.createElement("p", { className: "we-update-notice__callout" },
-        "③ ", noticeEx(2), React.createElement("strong", null, weT("新增「点个星喵⭐」按钮")),
-        weT("：侧栏壁纸卡片一键直达仓库，欢迎来点颗星！")),
-      React.createElement("p", { className: "we-update-notice__callout" },
-        "④ ", noticeEx(2), React.createElement("strong", null, weT("Linux 用户更省电")),
+        "③ ", noticeEx(2), React.createElement("strong", null, weT("Linux 用户更省电")),
         weT("：窗口被遮挡时自动降帧，完全遮挡时暂停渲染。")),
+      React.createElement("p", { className: "we-update-notice__callout" },
+        "④ ", noticeEx(2), React.createElement("strong", null, weT("在设置中启用深色模式 + 「作者自用」预设，为本插件最佳效果之一！"))),
       React.createElement("p", { className: "we-update-notice__hint" },
         weT("升级后建议重启一次 DSH，改动才完整生效；本提示每个新版本只出现一次，点下方按钮关闭后不再弹出。")),
     ),
