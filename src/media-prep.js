@@ -697,11 +697,29 @@ function buildMedia(sel) {
 //   · 层被换掉（底层 `!isConnected`）时 tick 自行停表并摘掉过场图 —— 与
 //     `releaseLayerMedia` 只认 video/iframe 的既有收尾口径一致，不需要新钩子；
 //   · 页面隐藏那拍不推进（恢复可见后继续），不引入新的暂停语义。
-const imageSlidesCache = new Map(); // wallpaper id -> { images: string[], intervalMs: number }
+const imageSlidesCache = new Map(); // `${id}@${intervalMs}` -> { images: string[], intervalMs: number }
+
+/**
+ * 图内轮播的**生效周期**（毫秒）：用户设置（秒，0 = 跟随壁纸）优先于壁纸自带的
+ * WE 预设（`preset.imageswitchtimes` → 宿主算好的 `slideIntervalMs`）。
+ *
+ * 与 `rotationInterval` 是两件事：后者管「壁纸与壁纸之间」轮转（分钟），本函数管
+ * 「同一张壁纸内部多张图之间」轮播。用户没设（0 / 越界）时完整回落到预设，
+ * 行为与没有这个键时逐字一致。
+ */
+function pictureSlideIntervalMs(sel) {
+  const userSec = clampNum(sel && sel.pictureSlideSeconds, 0, 3600, 0);
+  if (userSec > 0) return userSec * 1000;
+  return clampNum(sel && sel.slideIntervalMs, 5000, 3600000, 30000);
+}
 
 function scheduleImageSlideshow(media, sel) {
   if (!media || !sel || !sel.slidesUrl) return;
-  const cached = imageSlidesCache.get(String(sel.id || ""));
+  const intervalMs = pictureSlideIntervalMs(sel);
+  // 缓存键带上生效周期：改间隔 = 换一条缓存（清单重拉一次并重装过场层）；
+  // 旧层随重建被摘掉后，旧计时器在下一拍自行停表。
+  const cacheKey = String(sel.id || "") + "@" + intervalMs;
+  const cached = imageSlidesCache.get(cacheKey);
   if (cached) { installImageSlideshow(media, cached); return; }
   if (typeof apiJson !== "function") return;
   Promise.resolve(apiJson(sel.slidesUrl)).then((r) => {
@@ -711,8 +729,8 @@ function scheduleImageSlideshow(media, sel) {
       .map((it) => (it && typeof it.url === "string" ? it.url : null))
       .filter((u) => !!u);
     if (images.length < 2) return;
-    const entry = { images, intervalMs: clampNum(sel.slideIntervalMs, 5000, 3600000, 30000) };
-    imageSlidesCache.set(String(sel.id || ""), entry);
+    const entry = { images, intervalMs };
+    imageSlidesCache.set(cacheKey, entry);
     // 拉清单期间用户可能已经切走：只有底层还在屏上才装过场层。
     if (media.isConnected) installImageSlideshow(media, entry);
   }).catch(() => { /* 清单不可达：退化成单张首图 */ });

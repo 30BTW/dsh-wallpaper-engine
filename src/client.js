@@ -3770,6 +3770,15 @@ const onGroupInterval = (e) => {
   syncRotationTimer();
   emit();
 };
+// 图内轮播间隔（图片 / 幻灯片壁纸；0 = 跟随壁纸自带的 WE 预设）。
+// 写完**立刻重整当前层**：生效周期参与清单缓存键（见 media-prep.js），重建即重装
+// 过场层，所以改完马上按新周期轮播，不需要重启或重选壁纸。非图片壁纸只存设置。
+const onPictureSlideSeconds = (e) => {
+  const sec = clampNum(Number(e.target.value), ...schemaRange("pictureSlideSeconds"), DEFAULTS.pictureSlideSeconds);
+  setSetting("pictureSlideSeconds", sec);
+  if (selection.type === "image" && selection.slidesUrl) applySelection(selection.id);
+  emit();
+};
 // 「删除」按钮**只置令牌**；真正的删除在问句行的「确认」里（不变量 2）。两件事分开的
 // 好处：守卫可以分别断言"第一下不删"与"确认才删"，而不是只验一个 if。
 const onArmDeleteGroup = () => {
@@ -4368,7 +4377,7 @@ function WallpaperPicker() {
     );
     return renderWallpaperTab({
       setSetting, setTransient,
-      INTERVALS, armedConfirm: sel.armedConfirm, cdMode, current, editing, editorPageView, group, groups, isLiveScene, onArmConfirm: armConfirm, onArmDeleteGroup, onCancelEditUploadDir, onCancelEditWeAssetsDir, onClear, onDeleteGroup, onDisarmConfirm: disarmConfirm, onEditInterval, onEditName, onEditOrder, onGroupChange, onGroupInterval, onOpenPicker, onOpenPickerDraft, onRefresh, onStartEditUploadDir, onStartEditWeAssetsDir, onSwitchTransition, onSwitchTransitionDir, onSwitchTransitionSpeed, onToggleAudio, onTogglePlay, onTogglePropsPanel, onToggleRotation, onUploadDirDraft, onWeAssetsDirDraft, pagerRow, playableCount, playableList, playbackLive, propsPanelOpen, renderUserPropsPanel, sel, setPickerOpener, uploadedList,
+      INTERVALS, armedConfirm: sel.armedConfirm, cdMode, current, editing, editorPageView, group, groups, isLiveScene, onArmConfirm: armConfirm, onArmDeleteGroup, onCancelEditUploadDir, onCancelEditWeAssetsDir, onClear, onDeleteGroup, onDisarmConfirm: disarmConfirm, onEditInterval, onEditName, onEditOrder, onGroupChange, onGroupInterval, onOpenPicker, onOpenPickerDraft, onPictureSlideSeconds, onRefresh, onStartEditUploadDir, onStartEditWeAssetsDir, onSwitchTransition, onSwitchTransitionDir, onSwitchTransitionSpeed, onToggleAudio, onTogglePlay, onTogglePropsPanel, onToggleRotation, onUploadDirDraft, onWeAssetsDirDraft, pagerRow, playableCount, playableList, playbackLive, propsPanelOpen, renderUserPropsPanel, sel, setPickerOpener, uploadedList,
     });
   };
   const tabIdx = Math.max(0, PICKER_TABS.findIndex((t) => t.id === activeTab));
